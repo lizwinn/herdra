@@ -1017,3 +1017,151 @@ fn popup_menus_read_as_their_actions_in_help_and_bars() {
         assert_eq!(menu.bar, Some(BarVisibility::Hidden));
     }
 }
+
+/// Actions the default tree does not bind as leaves, with the reason.
+const UNBOUND_BY_DEFAULT: &[&str] = &[
+    // The default tree opens these popups through their view menus.
+    "app.help",
+    "app.navigator",
+    "app.settings",
+];
+
+#[test]
+fn every_action_has_a_catalog_entry_and_a_default_key() {
+    use crate::input::keybindings::KeybindAction as A;
+
+    // No wildcard arm: an action added upstream fails to compile here until
+    // it has a catalog entry below and a key in default.kdl (or a place in
+    // UNBOUND_BY_DEFAULT).
+    fn upstream_action(action: A) -> Option<A> {
+        match action {
+            A::NewWorkspace
+            | A::NewWorktree
+            | A::OpenWorktree
+            | A::RemoveWorktree
+            | A::RenameWorkspace
+            | A::CloseWorkspace
+            | A::PreviousWorkspace
+            | A::NextWorkspace
+            | A::PreviousAgent
+            | A::NextAgent
+            | A::NewTab
+            | A::RenameTab
+            | A::PreviousTab
+            | A::NextTab
+            | A::MoveTabPrevious
+            | A::MoveTabNext
+            | A::CloseTab
+            | A::RenamePane
+            | A::FocusPaneLeft
+            | A::FocusPaneDown
+            | A::FocusPaneUp
+            | A::FocusPaneRight
+            | A::SwapPaneLeft
+            | A::SwapPaneDown
+            | A::SwapPaneUp
+            | A::SwapPaneRight
+            | A::SplitVertical
+            | A::SplitHorizontal
+            | A::ClosePane
+            | A::EditScrollback
+            | A::ClearPane
+            | A::Zoom
+            | A::ResizePaneLeft
+            | A::ResizePaneDown
+            | A::ResizePaneUp
+            | A::ResizePaneRight
+            | A::ToggleSidebar
+            | A::CyclePaneNext
+            | A::CyclePanePrevious
+            | A::LastPane
+            | A::Help
+            | A::Settings
+            | A::ReloadConfig
+            | A::OpenNotificationTarget
+            | A::Detach
+            | A::OpenNavigator
+            | A::WhatsNew => Some(action),
+            // Indexed actions are checked through their catalog entries;
+            // view commands are Herdra's own.
+            A::SwitchWorkspace(_)
+            | A::SwitchTab(_)
+            | A::FocusAgent(_)
+            | A::WorkspaceList(_)
+            | A::Copy(_)
+            | A::NavigatorView(_)
+            | A::HelpView(_)
+            | A::SettingsView(_) => None,
+        }
+    }
+    let unit_actions = [
+        A::NewWorkspace,
+        A::NewWorktree,
+        A::OpenWorktree,
+        A::RemoveWorktree,
+        A::RenameWorkspace,
+        A::CloseWorkspace,
+        A::PreviousWorkspace,
+        A::NextWorkspace,
+        A::PreviousAgent,
+        A::NextAgent,
+        A::NewTab,
+        A::RenameTab,
+        A::PreviousTab,
+        A::NextTab,
+        A::MoveTabPrevious,
+        A::MoveTabNext,
+        A::CloseTab,
+        A::RenamePane,
+        A::FocusPaneLeft,
+        A::FocusPaneDown,
+        A::FocusPaneUp,
+        A::FocusPaneRight,
+        A::SwapPaneLeft,
+        A::SwapPaneDown,
+        A::SwapPaneUp,
+        A::SwapPaneRight,
+        A::SplitVertical,
+        A::SplitHorizontal,
+        A::ClosePane,
+        A::EditScrollback,
+        A::ClearPane,
+        A::Zoom,
+        A::ResizePaneLeft,
+        A::ResizePaneDown,
+        A::ResizePaneUp,
+        A::ResizePaneRight,
+        A::ToggleSidebar,
+        A::CyclePaneNext,
+        A::CyclePanePrevious,
+        A::LastPane,
+        A::Help,
+        A::Settings,
+        A::ReloadConfig,
+        A::OpenNotificationTarget,
+        A::Detach,
+        A::OpenNavigator,
+        A::WhatsNew,
+    ];
+    for action in unit_actions.into_iter().filter_map(upstream_action) {
+        assert!(
+            CATALOG
+                .iter()
+                .any(|entry| entry.action == crate::input::keymap::CatalogAction::Fixed(action)),
+            "{action:?} has no catalog entry in src/input/keymap/catalog.rs"
+        );
+    }
+
+    let words = DEFAULT_KEYMAP
+        .split(|c: char| c.is_whitespace() || c == '"')
+        .collect::<std::collections::HashSet<_>>();
+    let unbound = CATALOG
+        .iter()
+        .map(|entry| entry.id)
+        .filter(|id| !words.contains(id) && !UNBOUND_BY_DEFAULT.contains(id))
+        .collect::<Vec<_>>();
+    assert!(
+        unbound.is_empty(),
+        "bind these in default.kdl or list them in UNBOUND_BY_DEFAULT: {unbound:?}"
+    );
+}
