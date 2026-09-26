@@ -1934,25 +1934,23 @@ impl HeadlessServer {
                         return false;
                     }
                 };
+                // Every endpoint handshake advertises keymap_projection, so
+                // always send this server's layers, even none: an empty
+                // projection replaces layers the client kept from an earlier
+                // server on this endpoint.
                 let keymap_projection = self.app.keymap_projection(&seed_snapshot.boot_id);
-                let keymap_message = if self
-                    .app
-                    .keymap_projection_needed(endpoint_keybindings, false)
-                {
-                    match crate::protocol::endpoint::keymap_projection_message(&keymap_projection) {
-                        Ok(message) => Some(message),
-                        Err(err) => {
-                            warn!(client_id, err = %err, "failed to encode endpoint keymap");
-                            return false;
-                        }
+                let keymap_message = match crate::protocol::endpoint::keymap_projection_message(
+                    &keymap_projection,
+                ) {
+                    Ok(message) => message,
+                    Err(err) => {
+                        warn!(client_id, err = %err, "failed to encode endpoint keymap");
+                        return false;
                     }
-                } else {
-                    None
                 };
                 connection.shell_keymap_revision = self.app.keymap_revision;
-                connection.shell_keymap_sent = keymap_message.is_some()
-                    && (!keymap_projection.plugins.is_empty()
-                        || keymap_projection.server_keymap.is_some());
+                connection.shell_keymap_sent = !keymap_projection.plugins.is_empty()
+                    || keymap_projection.server_keymap.is_some();
                 connection.shell_location = Some(location);
                 connection.shell_snapshot = Some(seed_snapshot);
                 connection.shell_agent_completions = Some(completion_projection);
@@ -1961,9 +1959,7 @@ impl HeadlessServer {
                 if self.app.state.popup_pane.is_some() && self.popup_owner_tab_id.is_none() {
                     self.popup_owner_tab_id = self.shell_tab_id_for_client(client_id);
                 }
-                if let Some(message) = keymap_message {
-                    self.send_to_client(client_id, message);
-                }
+                self.send_to_client(client_id, keymap_message);
                 if let Some(message) = projection_message {
                     self.send_to_client(client_id, message);
                 }

@@ -138,6 +138,22 @@ impl ClientShellState {
         }
     }
 
+    /// Forget the keymap layers of an endpoint's earlier connection. A new
+    /// connection may reach another server, or one that sends no layers:
+    /// capable servers send their current layers on attach, and the rest
+    /// must not keep an earlier server's plugin menus.
+    pub(crate) fn reset_endpoint_keymap_projection(&mut self, endpoint_id: &ClientEndpointId) {
+        let cleared = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.keymap_projection.take())
+            .is_some();
+        if cleared && endpoint_id == &self.active_endpoint_id {
+            self.refresh_keymap_layers();
+        }
+    }
+
     /// Rebuild the keymap from the active server's layers.
     pub(super) fn refresh_keymap_layers(&mut self) {
         let projection = self
@@ -713,6 +729,20 @@ impl ClientShellState {
                 })
             {
                 endpoint.agent_view_projection = None;
+            }
+        }
+        // Keymap layers belong to one server boot, and a server sends its
+        // layers before the first snapshot of a connection: layers from
+        // another boot are stale.
+        let stale_keymap = endpoint
+            .keymap_projection
+            .as_ref()
+            .zip(endpoint.snapshot.as_deref())
+            .is_some_and(|(projection, snapshot)| projection.boot_id != snapshot.boot_id);
+        if stale_keymap {
+            endpoint.keymap_projection = None;
+            if endpoint_id == &self.active_endpoint_id {
+                self.refresh_keymap_layers();
             }
         }
     }

@@ -868,6 +868,51 @@ fn server_keybinding_source_uses_the_server_keymap() {
     assert!(tab_created(&state.handle_input_bytes(b"c")));
 }
 
+/// Whether the keymap has the `example.layout` plugin's `ctrl+b p g`.
+fn has_layout_plugin_menu(state: &ClientShellState) -> bool {
+    let keymap = &state.config.keymap;
+    keymap.menu_by_path("ctrl+b p").is_some_and(|menu| {
+        keymap
+            .menu(menu)
+            .bindings
+            .iter()
+            .any(|binding| binding.hint == "layout")
+    })
+}
+
+#[test]
+fn reconnect_with_an_empty_keymap_projection_removes_old_plugin_menus() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let plugin_layers = keymap_projection(
+        5,
+        &[("example.layout", "prefix { p { g plugin apply layout } }")],
+        None,
+    );
+    state.set_endpoint_keymap_projection(&ClientEndpointId::Local, plugin_layers.clone());
+    assert!(has_layout_plugin_menu(&state));
+
+    // The endpoint reconnects to the same server boot, which dropped the
+    // plugin; its keymap revision can be lower than the old connection's.
+    state.reset_endpoint_keymap_projection(&ClientEndpointId::Local);
+    state.set_endpoint_keymap_projection(&ClientEndpointId::Local, keymap_projection(1, &[], None));
+    assert!(!has_layout_plugin_menu(&state));
+
+    // A server that sends no layers at all keeps none of the old ones.
+    state.set_endpoint_keymap_projection(&ClientEndpointId::Local, plugin_layers.clone());
+    assert!(has_layout_plugin_menu(&state));
+    state.reset_endpoint_keymap_projection(&ClientEndpointId::Local);
+    assert!(!has_layout_plugin_menu(&state));
+
+    // Layers from an earlier server boot go with its snapshots.
+    state.set_endpoint_keymap_projection(&ClientEndpointId::Local, plugin_layers);
+    assert!(has_layout_plugin_menu(&state));
+    let mut restarted = snapshot();
+    restarted.boot_id = "boot-2".into();
+    state.set_snapshot(Box::new(restarted));
+    assert!(!has_layout_plugin_menu(&state));
+}
+
 fn frame_text(frame: &crate::client::frame_output::ComposedFrame) -> String {
     frame
         .cells

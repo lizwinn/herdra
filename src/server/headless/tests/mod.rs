@@ -740,6 +740,57 @@ async fn client_shell_attach_seeds_workspace() {
 }
 
 #[tokio::test]
+async fn client_shell_attach_always_sends_the_keymap_projection() {
+    let mut server = test_headless_server();
+    server.app.state.workspaces = vec![crate::workspace::Workspace::test_new("endpoint")];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    // Nothing to contribute: no plugin trees and no user keymap.
+    assert!(server.app.plugin_keymaps.is_empty());
+    assert_eq!(server.app.shared_user_keymap, None);
+    let (writer, control_rx, _render_rx) = test_client_writer();
+    let client_id = 93;
+
+    server.handle_server_event(ServerEvent::ClientShellConnected {
+        client_id,
+        surface_cols: 80,
+        surface_rows: 24,
+        cell_width_px: 0,
+        cell_height_px: 0,
+        pixel_mouse: false,
+        direct_graphics: false,
+        endpoint_keybindings: false,
+        mouse_capture: false,
+        surface_active: false,
+        surface_reuse: false,
+        surface_delta: false,
+        writer,
+    });
+
+    let ServerMessage::EndpointControl { kind, data } = read_server_message(
+        control_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("keymap projection"),
+    ) else {
+        panic!("expected the keymap projection first");
+    };
+    assert_eq!(kind, protocol::endpoint::KEYMAP_PROJECTION_KIND);
+    let projection: protocol::endpoint::EndpointKeymapProjection =
+        serde_json::from_str(&data).expect("decode keymap projection");
+    assert_eq!(projection.boot_id, server.client_shell_boot_id);
+    assert_eq!(projection.revision, server.app.keymap_revision);
+    assert!(projection.plugins.is_empty());
+    assert_eq!(projection.server_keymap, None);
+    let (snapshot, _) = client_shell_projection(&control_rx);
+    assert_eq!(snapshot.boot_id, projection.boot_id);
+    assert!(!server.clients[&client_id].shell_keymap_sent);
+    assert_eq!(
+        server.clients[&client_id].shell_keymap_revision,
+        server.app.keymap_revision
+    );
+}
+
+#[tokio::test]
 async fn completion_guard_endpoint_pairs_runtime_completions_with_snapshots() {
     let mut server = test_headless_server();
     let workspace = crate::workspace::Workspace::test_new("endpoint");
