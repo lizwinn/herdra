@@ -1035,7 +1035,9 @@ pub(super) fn convert_legacy_keys(keys: &toml::Table) -> LegacyMigration {
     notes.append(&mut claims.notes);
 
     // Navigate lives at its classic key while that key still opens it;
-    // otherwise at its first new key, as a copy of the classic menu.
+    // otherwise at its first new key after the prefix (or its first key),
+    // as a copy of the classic menu. After the prefix, keys navigate does
+    // not bind fall through to the prefix menu, as they did before.
     let navigate_diff = ScopeDiff::new(
         &classic_defaults(Scope::Navigate, prefix),
         &claims.in_scope(Scope::Navigate),
@@ -1052,7 +1054,11 @@ pub(super) fn convert_legacy_keys(keys: &toml::Table) -> LegacyMigration {
     let mut navigate_overrides = Vec::new();
     if locations.contains(&(Scope::Prefix, CLASSIC_NAVIGATE_KEY)) {
         navigate_overrides = navigate_diff.lines();
-    } else if let Some(&(scope, home)) = locations.first() {
+    } else if let Some(&(scope, home)) = locations
+        .iter()
+        .find(|(scope, _)| *scope == Scope::Prefix)
+        .or(locations.first())
+    {
         // A classic menu already sits at `home` in the prefix menu; a menu
         // written there would merge with it.
         let taken = scope == Scope::Prefix
