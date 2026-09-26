@@ -82,10 +82,18 @@ pub(crate) fn app_dir_name() -> &'static str {
     io::app_dir_name()
 }
 
+/// Serializes tests that point config env vars at temporary files.
+///
+/// `HERDR_KEYMAP_PATH` from the environment running the tests would redirect
+/// every keymap read, so it is cleared once, before the first test takes this
+/// lock. Tests that set it restore it before releasing the lock.
 #[cfg(test)]
 pub(crate) fn test_config_env_lock() -> &'static std::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    LOCK.get_or_init(|| {
+        std::env::remove_var(io::KEYMAP_PATH_ENV_VAR);
+        std::sync::Mutex::new(())
+    })
 }
 
 impl Config {
