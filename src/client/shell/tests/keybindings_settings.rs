@@ -777,6 +777,7 @@ fn keymap_projection(
             )
             .collect(),
         server_keymap: server_keymap.map(str::to_owned),
+        commands: Vec::new(),
     }
 }
 
@@ -919,5 +920,99 @@ fn mode_hint_bar_setting_hides_menu_bars_unless_a_menu_asks() {
     assert!(
         search.contains("enter search"),
         "the search prompt shows without a bar: {search:?}"
+    );
+}
+
+#[test]
+fn command_keys_find_server_commands_by_fingerprint_not_by_keys() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config_with_keymap(
+        "base prefix=ctrl+a\nprefix { y popup \"lazygit\" }",
+    )));
+    let mut projected = snapshot();
+    for (command_id, action) in [
+        (
+            "cmd_plugin",
+            crate::protocol::ClientShellCommandAction::PluginAction,
+        ),
+        ("cmd_htop", crate::protocol::ClientShellCommandAction::Popup),
+        (
+            "cmd_lazygit",
+            crate::protocol::ClientShellCommandAction::Popup,
+        ),
+    ] {
+        projected
+            .commands
+            .push(crate::protocol::ClientShellCommand {
+                command_id: command_id.into(),
+                binding_label: "server label".into(),
+                binding_labels: Vec::new(),
+                action,
+                description: None,
+            });
+    }
+    state.set_snapshot(Box::new(projected));
+    let mut projection = keymap_projection(
+        1,
+        &[("example.layout", "prefix { p { g plugin apply layout } }")],
+        None,
+    );
+    state.set_endpoint_keymap_projection(&ClientEndpointId::Local, projection.clone());
+    let fingerprint = |path: &str| {
+        state
+            .config
+            .keymap
+            .commands
+            .iter()
+            .find(|command| command.path_label == path)
+            .and_then(|command| command.identity("boot-1"))
+            .expect("client command")
+    };
+    let plugin = fingerprint("ctrl+a p g");
+    let lazygit = fingerprint("ctrl+a y");
+    let htop = command_leaf("ctrl+a y", crate::input::keymap::CommandKind::Popup, "htop")
+        .identity("boot-1")
+        .expect("fingerprint");
+    projection.revision = 2;
+    projection.commands = vec![
+        crate::protocol::endpoint::EndpointKeymapCommand {
+            command_id: "cmd_plugin".into(),
+            path: "ctrl+b p g".into(),
+            identity: plugin,
+        },
+        crate::protocol::endpoint::EndpointKeymapCommand {
+            command_id: "cmd_htop".into(),
+            path: "ctrl+a y".into(),
+            identity: htop,
+        },
+    ];
+    state.set_endpoint_keymap_projection(&ClientEndpointId::Local, projection.clone());
+
+    let outcome = state.handle_input_bytes(b"\x01pg");
+    assert_eq!(
+        command_invocation(&outcome).as_deref(),
+        Some("cmd_plugin"),
+        "the server's prefix differs, but it is the same plugin command"
+    );
+    let outcome = state.handle_input_bytes(b"\x01y");
+    assert_eq!(
+        command_invocation(&outcome),
+        None,
+        "the server runs htop at these keys, not lazygit"
+    );
+
+    projection.revision = 3;
+    projection
+        .commands
+        .push(crate::protocol::endpoint::EndpointKeymapCommand {
+            command_id: "cmd_lazygit".into(),
+            path: "ctrl+b g".into(),
+            identity: lazygit,
+        });
+    state.set_endpoint_keymap_projection(&ClientEndpointId::Local, projection);
+    let outcome = state.handle_input_bytes(b"\x01y");
+    assert_eq!(
+        command_invocation(&outcome).as_deref(),
+        Some("cmd_lazygit"),
+        "the same command runs even under other keys on the server"
     );
 }

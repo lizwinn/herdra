@@ -108,14 +108,42 @@ pub(crate) struct CompiledMenu {
 
 #[derive(Clone, Debug)]
 pub(crate) struct CompiledCommand {
-    /// Chords that reach this command, space separated. Client and server
-    /// agree on command identity through this label.
+    /// Chords that reach this command, space separated.
     pub(crate) path_label: String,
     pub(crate) spec: CommandSpec,
     pub(crate) hint: String,
     /// Which layer defined the command; plugin commands run on the server
     /// that owns the plugin.
     pub(crate) owner: LayerOwner,
+}
+
+/// What replaces command text in a keymap shared with clients.
+pub(crate) const REDACTED_COMMAND: &str = "…";
+
+impl CompiledCommand {
+    /// A salted fingerprint of what this command runs. A client matches its
+    /// own command keys to server command ids by fingerprint, so the server
+    /// never sends command text and a different command at the same keys
+    /// never runs. `None` for commands from a redacted keymap.
+    pub(crate) fn identity(&self, salt: &str) -> Option<String> {
+        use sha2::{Digest, Sha256};
+
+        if self.spec.command == REDACTED_COMMAND {
+            return None;
+        }
+        let mut hasher = Sha256::new();
+        for part in [salt, self.spec.kind.word(), self.spec.command.as_str()] {
+            hasher.update(part.as_bytes());
+            hasher.update([0]);
+        }
+        let digest = hasher.finalize();
+        Some(
+            digest[..12]
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect(),
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

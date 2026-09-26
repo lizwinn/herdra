@@ -48,6 +48,19 @@ pub struct EndpointKeymapProjection {
     /// that use the server's keymap.
     #[serde(default)]
     pub server_keymap: Option<String>,
+    /// The server's command keys, so clients can find the command id for
+    /// their own command keys without the server sending command text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<EndpointKeymapCommand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointKeymapCommand {
+    pub command_id: String,
+    /// Chords that reach the command in the server's keymap.
+    pub path: String,
+    /// Fingerprint of the command's kind and text, salted with `boot_id`.
+    pub identity: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -428,6 +441,11 @@ mod tests {
                 text: "prefix { L plugin apply }".into(),
             }],
             server_keymap: None,
+            commands: vec![EndpointKeymapCommand {
+                command_id: "cmd_1".into(),
+                path: "ctrl+b g".into(),
+                identity: "0123456789abcdef01234567".into(),
+            }],
         };
         let ServerMessage::EndpointControl { kind, data } =
             keymap_projection_message(&projection).unwrap()
@@ -441,6 +459,7 @@ mod tests {
             serde_json::from_str(r#"{"boot_id":"boot","revision":1}"#).unwrap();
         assert!(minimal.plugins.is_empty());
         assert_eq!(minimal.server_keymap, None);
+        assert!(minimal.commands.is_empty());
     }
 
     #[test]

@@ -33,7 +33,7 @@ struct EndpointCommand {
 
 impl EndpointCommandRegistry {
     /// Mint opaque ids for every command leaf in the server's keymap. Clients
-    /// find a command's id by the chord path that reaches it.
+    /// find a command's id through the keymap projection's fingerprints.
     pub(super) fn new(commands: &[crate::input::keymap::CompiledCommand]) -> Self {
         let namespace = new_command_namespace();
         let entries = commands
@@ -47,6 +47,41 @@ impl EndpointCommandRegistry {
             .collect();
         Self { entries }
     }
+
+    /// Command ids with the chord path and fingerprint of each command, for
+    /// the keymap projection.
+    pub(super) fn projection(
+        &self,
+        salt: &str,
+    ) -> Vec<crate::protocol::endpoint::EndpointKeymapCommand> {
+        self.entries
+            .iter()
+            .filter_map(|entry| {
+                Some(crate::protocol::endpoint::EndpointKeymapCommand {
+                    command_id: entry.id.clone(),
+                    path: entry.command.path_label.clone(),
+                    identity: entry.command.identity(salt)?,
+                })
+            })
+            .collect()
+    }
+}
+
+/// The label Herdr clients before the keymap tree understand: `prefix+x`
+/// for one key after the prefix, the chord itself at the top level, and
+/// nothing for deeper keys.
+fn legacy_binding_labels(path_label: &str, prefix: crate::config::KeyCombo) -> Vec<String> {
+    let chords = path_label.split(' ').collect::<Vec<_>>();
+    if chords.iter().any(|chord| chord.contains("..")) {
+        return Vec::new();
+    }
+    match chords.as_slice() {
+        [chord] => vec![(*chord).to_owned()],
+        [first, chord] if *first == crate::config::format_key_combo(prefix) => {
+            vec![format!("prefix+{chord}")]
+        }
+        _ => Vec::new(),
+    }
 }
 
 impl App {
@@ -57,7 +92,10 @@ impl App {
             .map(|entry| crate::protocol::ClientShellCommand {
                 command_id: entry.id.clone(),
                 binding_label: entry.command.path_label.clone(),
-                binding_labels: vec![entry.command.path_label.clone()],
+                binding_labels: legacy_binding_labels(
+                    &entry.command.path_label,
+                    self.keymap.prefix,
+                ),
                 action: entry.action,
                 description: Some(entry.command.hint.clone()),
             })
@@ -604,7 +642,11 @@ mod tests {
         let manifest = app.client_shell_command_manifest();
         assert_eq!(manifest.len(), 1);
         assert_eq!(manifest[0].binding_label, "ctrl+b z");
-        assert_eq!(manifest[0].binding_labels, ["ctrl+b z"]);
+        assert_eq!(manifest[0].binding_labels, ["prefix+z"]);
+        let projection = app.keymap_projection("boot");
+        assert_eq!(projection.commands.len(), 1);
+        assert_eq!(projection.commands[0].command_id, manifest[0].command_id);
+        assert!(!format!("{projection:?}").contains("secret-command"));
         assert_eq!(manifest[0].description.as_deref(), Some("safe description"));
         assert!(!format!("{:?}", manifest).contains("secret-command"));
         assert_eq!(

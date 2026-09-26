@@ -849,6 +849,7 @@ impl App {
                 )
                 .collect(),
             server_keymap: self.shared_user_keymap.clone(),
+            commands: self.endpoint_commands.projection(boot_id),
         }
     }
 
