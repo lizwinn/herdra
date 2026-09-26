@@ -746,3 +746,15 @@ fn built_in_keys_give_way_to_a_custom_prefix() {
         "with the default prefix, ctrl+b opens the menu"
     );
 }
+
+#[test]
+fn keys_match_by_the_character_they_type_when_the_code_differs() {
+    // A layout where shift+7 types "/": kitty reports the physical key and
+    // the generated text, and the copy menu binds "/".
+    let keymap = CompiledKeymap::default();
+    let mut slash = TerminalKey::new(KeyCode::Char('7'), KeyModifiers::SHIFT);
+    slash.generated_text = Some("/".to_owned());
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('p'), ch('y'), slash]);
+    assert_eq!(titles(&keymap, stack), ["copy"]);
+    assert_eq!(ran, ["copy.search.forward"]);
+}
