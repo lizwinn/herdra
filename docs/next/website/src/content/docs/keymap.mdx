@@ -380,3 +380,5 @@ Plugins can ship their own `keymap.kdl` that adds keys and menus to this tree. H
 ## Migrating from [keys]
 
 Herdra no longer reads the `[keys]` table, `[[keys.command]]`, or `[keys.indexed]` in `config.toml`. `herdr config check` reports them. Run `herdr keymap migrate` to convert them: it writes a `keymap.kdl` that starts from `base classic` and applies your changes, backs up `config.toml`, and removes `[keys]` from it. `keys.remote_image_paste` moves to `[remote] image_paste_key`. Use `--dry-run` to print the result without writing anything.
+
+The converted file lists only what differs from the classic tree. When two old settings claimed the same key, it goes to the setting that won before. `migrate` prints a note for each setting it could not carry over, such as a key without the prefix that would intercept typing. If `keymap.kdl` already exists, it prints the lines to add by hand instead. If the converted file would not load, it writes nothing, leaves `config.toml` unchanged, prints the problems, and exits with an error.
