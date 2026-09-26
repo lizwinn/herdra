@@ -37,6 +37,7 @@ pub(super) fn render_settings_overlay(
     buffer: &mut Buffer,
     settings: &ClientSettingsOverlay,
     integration_updates_available: bool,
+    view_menu: Option<&crate::input::keymap::CompiledMenu>,
     palette: &Palette,
 ) -> Option<OverlayRender> {
     let integration_height = 14u16
@@ -239,7 +240,7 @@ pub(super) fn render_settings_overlay(
         inner.x,
         inner.bottom().saturating_sub(2),
         inner.width,
-        " ↑↓ select  tab section",
+        &view_hints(view_menu),
         Style::default().fg(palette.overlay1).bg(palette.panel_bg),
     );
 

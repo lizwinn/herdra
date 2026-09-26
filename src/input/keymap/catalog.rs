@@ -1,7 +1,10 @@
 //! Every action a keymap leaf can name, with the labels the hint bar and the
 //! help overlay show for it.
 
-use crate::input::keybindings::{CopyCommand, KeybindAction, WorkspaceListCommand};
+use crate::input::keybindings::{
+    CopyCommand, HelpCommand, KeybindAction, NavigatorCommand, SettingsCommand,
+    WorkspaceListCommand,
+};
 
 /// How a catalog entry turns into a runnable action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,16 +37,50 @@ impl IndexedAction {
 pub(crate) enum ViewKind {
     WorkspaceList,
     Copy,
+    Navigator,
+    Help,
+    Settings,
 }
 
 impl ViewKind {
-    pub(crate) const ALL: [Self; 2] = [Self::WorkspaceList, Self::Copy];
+    pub(crate) const ALL: [Self; 5] = [
+        Self::WorkspaceList,
+        Self::Copy,
+        Self::Navigator,
+        Self::Help,
+        Self::Settings,
+    ];
 
     pub(crate) fn id(self) -> &'static str {
         match self {
             Self::WorkspaceList => "workspace-list",
             Self::Copy => "copy",
+            Self::Navigator => "navigator",
+            Self::Help => "help",
+            Self::Settings => "settings",
         }
+    }
+
+    /// Views drawn as a popup over the session. The popup shows the keys
+    /// of its menu itself, so these menus hide the bottom bar by default.
+    pub(crate) fn is_overlay(self) -> bool {
+        matches!(self, Self::Navigator | Self::Help | Self::Settings)
+    }
+
+    /// Views whose menus keep every key open until they close.
+    pub(crate) fn sticky_by_default(self) -> bool {
+        self != Self::WorkspaceList
+    }
+
+    /// The app action that opens this view from a leaf.
+    pub(crate) fn opener(self) -> Option<&'static CatalogEntry> {
+        let id = match self {
+            Self::Navigator => "app.navigator",
+            Self::Help => "app.help",
+            Self::Settings => "app.settings",
+            Self::WorkspaceList | Self::Copy => return None,
+        };
+        lookup(id)
     }
 
     pub(crate) fn parse(id: &str) -> Option<Self> {
@@ -130,13 +167,64 @@ const fn copy(
     }
 }
 
+const fn navigator(
+    id: &'static str,
+    command: NavigatorCommand,
+    hint: &'static str,
+    description: &'static str,
+) -> CatalogEntry {
+    CatalogEntry {
+        id,
+        action: CatalogAction::Fixed(KeybindAction::NavigatorView(command)),
+        hint,
+        description,
+        view: Some(ViewKind::Navigator),
+        exits_itself: false,
+    }
+}
+
+const fn help(
+    id: &'static str,
+    command: HelpCommand,
+    hint: &'static str,
+    description: &'static str,
+) -> CatalogEntry {
+    CatalogEntry {
+        id,
+        action: CatalogAction::Fixed(KeybindAction::HelpView(command)),
+        hint,
+        description,
+        view: Some(ViewKind::Help),
+        exits_itself: false,
+    }
+}
+
+const fn settings(
+    id: &'static str,
+    command: SettingsCommand,
+    hint: &'static str,
+    description: &'static str,
+) -> CatalogEntry {
+    CatalogEntry {
+        id,
+        action: CatalogAction::Fixed(KeybindAction::SettingsView(command)),
+        hint,
+        description,
+        view: Some(ViewKind::Settings),
+        exits_itself: false,
+    }
+}
+
 const fn exits_itself(mut entry: CatalogEntry) -> CatalogEntry {
     entry.exits_itself = true;
     entry
 }
 
 use CopyCommand as C;
+use HelpCommand as H;
 use KeybindAction as A;
+use NavigatorCommand as N;
+use SettingsCommand as S;
 use WorkspaceListCommand as L;
 
 pub(crate) const CATALOG: &[CatalogEntry] = &[
@@ -464,6 +552,140 @@ pub(crate) const CATALOG: &[CatalogEntry] = &[
         C::Escape,
         "clear",
         "clear selection or search, else exit",
+    )),
+    // navigator view
+    navigator("navigator.move.up", N::Up, "up", "move up the list"),
+    navigator("navigator.move.down", N::Down, "down", "move down the list"),
+    navigator(
+        "navigator.page.up",
+        N::PageUp,
+        "page up",
+        "move up eight rows",
+    ),
+    navigator(
+        "navigator.page.down",
+        N::PageDown,
+        "page down",
+        "move down eight rows",
+    ),
+    navigator(
+        "navigator.section.previous",
+        N::SectionPrevious,
+        "previous workspace",
+        "first row of the previous workspace",
+    ),
+    navigator(
+        "navigator.section.next",
+        N::SectionNext,
+        "next workspace",
+        "first row of the next workspace",
+    ),
+    navigator(
+        "navigator.top",
+        N::Top,
+        "first",
+        "select the first terminal",
+    ),
+    navigator("navigator.bottom", N::Bottom, "last", "select the last row"),
+    navigator(
+        "navigator.search",
+        N::Search,
+        "search",
+        "type in the search field",
+    ),
+    navigator(
+        "navigator.filter.blocked",
+        N::FilterBlocked,
+        "blocked",
+        "show blocked agents",
+    ),
+    navigator(
+        "navigator.filter.working",
+        N::FilterWorking,
+        "working",
+        "show working agents",
+    ),
+    navigator(
+        "navigator.filter.idle",
+        N::FilterIdle,
+        "idle",
+        "show idle agents",
+    ),
+    navigator(
+        "navigator.filter.done",
+        N::FilterDone,
+        "done",
+        "show done agents",
+    ),
+    navigator(
+        "navigator.filter.all",
+        N::FilterAll,
+        "all",
+        "clear the search and filter",
+    ),
+    navigator(
+        "navigator.filter.clear",
+        N::FilterClear,
+        "clear filter",
+        "clear the status filter",
+    ),
+    exits_itself(navigator(
+        "navigator.open",
+        N::Open,
+        "open",
+        "open the selected row",
+    )),
+    exits_itself(navigator(
+        "navigator.close",
+        N::Close,
+        "close",
+        "close the navigator",
+    )),
+    // help view
+    help(
+        "help.filter",
+        H::Filter,
+        "filter",
+        "type in the filter field",
+    ),
+    help("help.scroll.up", H::ScrollUp, "up", "scroll up"),
+    help("help.scroll.down", H::ScrollDown, "down", "scroll down"),
+    help("help.page.up", H::PageUp, "page up", "scroll up eight rows"),
+    help(
+        "help.page.down",
+        H::PageDown,
+        "page down",
+        "scroll down eight rows",
+    ),
+    help("help.top", H::Top, "top", "scroll to the top"),
+    help("help.bottom", H::Bottom, "bottom", "scroll to the bottom"),
+    exits_itself(help("help.close", H::Close, "close", "close keybinds")),
+    // settings view
+    settings(
+        "settings.section.next",
+        S::SectionNext,
+        "next section",
+        "next settings section",
+    ),
+    settings(
+        "settings.section.previous",
+        S::SectionPrevious,
+        "previous section",
+        "previous settings section",
+    ),
+    settings("settings.choice.up", S::ChoiceUp, "up", "previous choice"),
+    settings("settings.choice.down", S::ChoiceDown, "down", "next choice"),
+    exits_itself(settings(
+        "settings.apply",
+        S::Apply,
+        "apply",
+        "apply the selected choice or install integrations",
+    )),
+    exits_itself(settings(
+        "settings.close",
+        S::Close,
+        "close",
+        "close settings and undo a theme preview",
     )),
 ];
 

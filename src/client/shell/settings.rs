@@ -1,5 +1,4 @@
 use super::*;
-use crossterm::event::{KeyCode, KeyModifiers};
 
 pub(super) fn normalized_theme_name(name: &str) -> String {
     name.to_lowercase().replace([' ', '_'], "-")
@@ -33,6 +32,11 @@ pub(super) fn integration_needs_install(info: &crate::api::schema::IntegrationIn
 
 impl ClientShellState {
     pub(super) fn open_settings_overlay(&mut self) {
+        if matches!(self.overlay, Some(ClientShellOverlay::Settings(_))) {
+            // Keep the open dialog and the theme it would restore.
+            self.open_view_menu(crate::input::keymap::ViewKind::Settings);
+            return;
+        }
         self.overlay = Some(ClientShellOverlay::Settings(ClientSettingsOverlay {
             section: ClientSettingsSection::Theme,
             selected: theme_index(&self.config.theme_name),
@@ -43,6 +47,7 @@ impl ClientShellState {
             loading_integrations: false,
             installing_integrations: false,
         }));
+        self.open_view_menu(crate::input::keymap::ViewKind::Settings);
     }
 
     fn selected_index_for_settings_section(&self, section: ClientSettingsSection) -> usize {
@@ -149,6 +154,70 @@ impl ClientShellState {
         self.config.theme_name = (*name).to_owned();
         self.config.palette =
             crate::app::client_palette_for_theme(&self.config.theme_runtime, name);
+    }
+
+    /// Close settings and undo a theme preview, unless integrations are
+    /// installing. Returns whether settings closed.
+    pub(super) fn close_settings_overlay(&mut self) -> bool {
+        if matches!(
+            self.overlay,
+            Some(ClientShellOverlay::Settings(ClientSettingsOverlay {
+                installing_integrations: true,
+                ..
+            }))
+        ) {
+            return false;
+        }
+        self.cancel_settings_overlay();
+        true
+    }
+
+    /// Settings is a dialog: an action from outside it (a prefix-free
+    /// chord, `?`) closes it first and undoes a theme preview. Returns
+    /// false, dropping the action, while integrations install.
+    pub(super) fn leave_settings_for(&mut self, action: crate::input::KeybindAction) -> bool {
+        use crate::input::KeybindAction as A;
+
+        if !matches!(self.overlay, Some(ClientShellOverlay::Settings(_)))
+            || matches!(
+                action,
+                A::SettingsView(_) | A::Settings | A::Detach | A::ToggleSidebar
+            )
+        {
+            return true;
+        }
+        self.close_settings_overlay()
+    }
+
+    /// Run a settings menu key. Does nothing unless settings is open.
+    pub(super) fn run_settings_command(
+        &mut self,
+        command: crate::input::SettingsCommand,
+        outcome: &mut ClientShellInput,
+    ) {
+        use crate::input::SettingsCommand as S;
+
+        if !matches!(self.overlay, Some(ClientShellOverlay::Settings(_))) {
+            return;
+        }
+        match command {
+            S::SectionNext => self.move_settings_section(1, outcome),
+            S::SectionPrevious => self.move_settings_section(-1, outcome),
+            S::ChoiceUp => {
+                self.move_settings_selection(-1);
+                outcome.repaint = true;
+            }
+            S::ChoiceDown => {
+                self.move_settings_selection(1);
+                outcome.repaint = true;
+            }
+            S::Apply => self.apply_settings_choice(outcome),
+            S::Close => {
+                if self.close_settings_overlay() {
+                    outcome.repaint = true;
+                }
+            }
+        }
     }
 
     pub(super) fn cancel_settings_overlay(&mut self) {
@@ -345,56 +414,5 @@ impl ClientShellState {
             }
             _ => (false, Vec::new()),
         }
-    }
-
-    pub(super) fn route_settings_key(
-        &mut self,
-        key: &crate::input::TerminalKey,
-        outcome: &mut ClientShellInput,
-    ) -> bool {
-        if !matches!(self.overlay, Some(ClientShellOverlay::Settings(_))) {
-            return false;
-        }
-        let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
-        if code == KeyCode::Esc {
-            if !matches!(
-                self.overlay,
-                Some(ClientShellOverlay::Settings(ClientSettingsOverlay {
-                    installing_integrations: true,
-                    ..
-                }))
-            ) {
-                self.cancel_settings_overlay();
-                outcome.repaint = true;
-            }
-            return true;
-        }
-        if matches!(code, KeyCode::Tab | KeyCode::Right | KeyCode::Char('l'))
-            && modifiers.is_empty()
-        {
-            self.move_settings_section(1, outcome);
-            return true;
-        }
-        if matches!(code, KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h'))
-            && modifiers.difference(KeyModifiers::SHIFT).is_empty()
-        {
-            self.move_settings_section(-1, outcome);
-            return true;
-        }
-        if matches!(code, KeyCode::Up | KeyCode::Char('k')) && modifiers.is_empty() {
-            self.move_settings_selection(-1);
-            outcome.repaint = true;
-            return true;
-        }
-        if matches!(code, KeyCode::Down | KeyCode::Char('j')) && modifiers.is_empty() {
-            self.move_settings_selection(1);
-            outcome.repaint = true;
-            return true;
-        }
-        if matches!(code, KeyCode::Enter | KeyCode::Char(' ')) && modifiers.is_empty() {
-            self.apply_settings_choice(outcome);
-            return true;
-        }
-        true
     }
 }

@@ -5,10 +5,14 @@ use std::sync::Arc;
 
 use super::*;
 use crate::input::keymap::{
-    self, CatalogAction, Chord, CompiledBinding, CompiledKeymap, CompiledTarget, Effect, MenuId,
-    MenuStack, Step, ViewKind,
+    self, CatalogAction, Chord, CompiledBinding, CompiledKeymap, CompiledMenu, CompiledTarget,
+    Effect, MenuId, MenuStack, Step, ViewKind,
 };
 use crate::input::{KeybindAction, KeybindMatch};
+
+/// Views drawn as popup overlays. Each has a menu on the stack while its
+/// popup is open, and the menu's keys drive the popup.
+const POPUP_VIEWS: [ViewKind; 3] = [ViewKind::Navigator, ViewKind::Help, ViewKind::Settings];
 
 impl ClientShellMode {
     pub(super) fn stack(self) -> Option<MenuStack> {
@@ -69,6 +73,121 @@ impl ClientShellState {
             .or_else(|| keymap.menu_with_view(ViewKind::Copy))
     }
 
+    /// The view of the popup overlay that is open, if it is one.
+    pub(super) fn overlay_view(&self) -> Option<ViewKind> {
+        match self.overlay.as_ref()? {
+            ClientShellOverlay::Navigator(_) => Some(ViewKind::Navigator),
+            ClientShellOverlay::Help(_) => Some(ViewKind::Help),
+            ClientShellOverlay::Settings(_) => Some(ViewKind::Settings),
+            _ => None,
+        }
+    }
+
+    /// The menu whose keys drive the open popup: the highest open menu with
+    /// its view, else the first menu in the keymap that has it.
+    pub(super) fn overlay_view_menu(&self) -> Option<&CompiledMenu> {
+        let view = self.overlay_view()?;
+        let keymap = &self.config.keymap;
+        self.mode
+            .stack()
+            .and_then(|stack| {
+                stack
+                    .frames()
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|id| keymap.menu(*id).view == Some(view))
+            })
+            .or_else(|| keymap.menu_with_view(view))
+            .map(|id| keymap.menu(id))
+    }
+
+    /// Open the first menu with `view` over the open menus, unless an open
+    /// menu already has it. For popups opened without their key: a mouse
+    /// click, the global menu, or a leaf such as `app.help`.
+    pub(super) fn open_view_menu(&mut self, view: ViewKind) {
+        if self.view_active(view) {
+            return;
+        }
+        let Some(menu) = self.config.keymap.menu_with_view(view) else {
+            return;
+        };
+        self.mode = ClientShellMode::Menu(match self.mode.stack() {
+            Some(stack) => stack.pushed(menu),
+            None => MenuStack::single(menu),
+        });
+    }
+
+    /// Keep popups and their menus in step: an open popup has its menu on
+    /// the stack, and a popup's menu closes when the popup closes. Popups
+    /// open and close outside the key path too (mouse clicks, endpoint
+    /// results, keymap reloads), so this runs whenever input settles.
+    pub(super) fn reconcile_overlay_views(&mut self) {
+        let open = self.overlay_view();
+        for view in POPUP_VIEWS {
+            if Some(view) != open && self.view_active(view) {
+                self.drop_view_menus(view);
+                if self.mode == ClientShellMode::Terminal {
+                    self.mode = self.copy_or_terminal_mode();
+                }
+            }
+        }
+        if let Some(view) = open {
+            self.open_view_menu(view);
+        }
+    }
+
+    fn popup_views_active(&self) -> [bool; POPUP_VIEWS.len()] {
+        POPUP_VIEWS.map(|view| self.view_active(view))
+    }
+
+    /// Open the popup for a view whose menu just opened. Another popup in
+    /// place of settings closes settings first, undoing its theme preview.
+    fn open_popup(&mut self, view: ViewKind) {
+        if view != ViewKind::Settings
+            && self.overlay_view() == Some(ViewKind::Settings)
+            && !self.close_settings_overlay()
+        {
+            return;
+        }
+        match view {
+            ViewKind::Navigator => self.open_navigator_overlay(),
+            ViewKind::Help => self.open_help_overlay(),
+            ViewKind::Settings => self.open_settings_overlay(),
+            ViewKind::WorkspaceList | ViewKind::Copy => {}
+        }
+    }
+
+    /// Close the popup for a view whose menu just closed. Settings stays
+    /// open while it installs integrations, and its menu comes back.
+    fn close_popup(&mut self, view: ViewKind, outcome: &mut ClientShellInput) {
+        if self.overlay_view() != Some(view) {
+            return;
+        }
+        if view == ViewKind::Settings {
+            if self.close_settings_overlay() {
+                outcome.repaint = true;
+            }
+            return;
+        }
+        self.overlay = None;
+        outcome.repaint = true;
+    }
+
+    /// Scroll a keybind list that just opened to the keys of `menu`, the
+    /// menu `?` was pressed in. The main menus under the top level keep
+    /// the list at the top, where the prefix-free chords are.
+    fn focus_help_on(&mut self, menu: MenuId) {
+        let keymap = &self.config.keymap;
+        if keymap.menu(menu).parent == Some(MenuId::TOP) {
+            return;
+        }
+        let scroll = render::help_scroll_to_menu(keymap, menu, self.last_composed_size);
+        if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
+            help.scroll = scroll;
+        }
+    }
+
     /// Where keys go when menus close: copy mode when the focused pane has a
     /// copy session, otherwise the terminal.
     pub(super) fn copy_or_terminal_mode(&self) -> ClientShellMode {
@@ -94,10 +213,12 @@ impl ClientShellState {
     /// stay intact until `close_views`, so an action leaving the workspace
     /// list still acts on its selection.
     fn open_menus(&mut self, next: Option<MenuStack>, outcome: &mut ClientShellInput) -> OpenViews {
-        let before = OpenViews {
+        let popups_before = self.popup_views_active();
+        let mut before = OpenViews {
             mode: self.mode,
             list: self.workspace_list_active(),
             copy: self.view_active(ViewKind::Copy),
+            closed_popups: [false; POPUP_VIEWS.len()],
         };
         // Closing every menu returns to a copy session on the focused pane
         // that no open menu showed, the way leaving a mode used to.
@@ -128,6 +249,16 @@ impl ClientShellState {
                 self.drop_view_menus(ViewKind::Copy);
             }
         }
+        let popups = self.popup_views_active();
+        for (index, view) in POPUP_VIEWS.into_iter().enumerate() {
+            if popups[index] && !popups_before[index] && self.overlay_view() != Some(view) {
+                self.open_popup(view);
+                outcome.repaint = true;
+            }
+            // Only the key's own menu change closes a popup; an action that
+            // rebuilds the keymap resets the menus but keeps its popup.
+            before.closed_popups[index] = popups_before[index] && !popups[index];
+        }
         before
     }
 
@@ -137,6 +268,11 @@ impl ClientShellState {
         }
         if before.copy && !self.view_active(ViewKind::Copy) {
             self.end_copy_session(false, outcome);
+        }
+        for (index, view) in POPUP_VIEWS.into_iter().enumerate() {
+            if before.closed_popups[index] && !self.view_active(view) {
+                self.close_popup(view, outcome);
+            }
         }
     }
 
@@ -188,11 +324,31 @@ impl ClientShellState {
         key: &crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) -> Option<ClientInputTarget> {
-        if self.workspace_list_active() {
+        let popup_focused = self.top_view().is_some_and(ViewKind::is_overlay);
+        if self.workspace_list_active() && !popup_focused {
             self.pending_workspace_highlight = None;
         }
         let keymap = Arc::clone(&self.config.keymap);
-        match keymap::resolve(&keymap, self.mode.stack(), key) {
+        // The menu `?` is pressed in, for a keybind list opened by this key.
+        let source = self.mode.stack().map(|stack| stack.top());
+        let help_was_open = self.overlay_view() == Some(ViewKind::Help);
+        let target = self.resolve_keymap_key(&keymap, key, outcome);
+        if !help_was_open && self.overlay_view() == Some(ViewKind::Help) {
+            if let Some(menu) = source {
+                self.focus_help_on(menu);
+            }
+        }
+        self.reconcile_overlay_views();
+        target
+    }
+
+    fn resolve_keymap_key(
+        &mut self,
+        keymap: &CompiledKeymap,
+        key: &crate::input::TerminalKey,
+        outcome: &mut ClientShellInput,
+    ) -> Option<ClientInputTarget> {
+        match keymap::resolve(keymap, self.mode.stack(), key) {
             Step::Forward => self.focused_pane_id().map(ClientInputTarget::Pane),
             Step::Ignore => None,
             Step::Apply { next, mut effect } => {
@@ -208,9 +364,19 @@ impl ClientShellState {
                             effect = Effect::None;
                         }
                     }
-                    let list_command = matches!(action, Some(KeybindAction::WorkspaceList(_)));
+                    // View commands act on their view, not on the workspace
+                    // the list previews.
+                    let view_command = matches!(
+                        action,
+                        Some(
+                            KeybindAction::WorkspaceList(_)
+                                | KeybindAction::NavigatorView(_)
+                                | KeybindAction::HelpView(_)
+                                | KeybindAction::SettingsView(_)
+                        )
+                    );
                     if matches!(effect, Effect::Run { .. })
-                        && !list_command
+                        && !view_command
                         && self.workspace_list_active()
                         && self.workspace_preview_action_blocked()
                     {
@@ -228,9 +394,9 @@ impl ClientShellState {
                 let target = match effect {
                     Effect::None => None,
                     Effect::ForwardKey => self.focused_pane_id().map(ClientInputTarget::Pane),
-                    Effect::Literal { menu } => self.send_literal(&keymap, menu, key, outcome),
+                    Effect::Literal { menu } => self.send_literal(keymap, menu, key, outcome),
                     Effect::Run { binding, index } => {
-                        self.run_keymap_binding(&keymap, binding, index, outcome);
+                        self.run_keymap_binding(keymap, binding, index, outcome);
                         None
                     }
                 };
@@ -287,6 +453,8 @@ struct OpenViews {
     mode: ClientShellMode,
     list: bool,
     copy: bool,
+    /// Popups whose menus the key closed.
+    closed_popups: [bool; POPUP_VIEWS.len()],
 }
 
 /// The builtin action a binding runs, with its digit applied.

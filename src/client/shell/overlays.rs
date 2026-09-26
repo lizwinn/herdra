@@ -40,6 +40,7 @@ pub(crate) fn render_client_overlay(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     k: &crate::input::keymap::CompiledKeymap,
+    view_menu: Option<&crate::input::keymap::CompiledMenu>,
     p: &Palette,
 ) -> Option<OverlayRender> {
     if !matches!(
@@ -63,13 +64,17 @@ pub(crate) fn render_client_overlay(
         }
         ClientShellOverlay::Rename(v) => render_rename_overlay(b, v, p),
         ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p),
-        ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p),
+        ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, view_menu, p),
         ClientShellOverlay::Navigator(v) => {
-            render_navigator_overlay(b, v, endpoints, active_endpoint_id, p)
+            render_navigator_overlay(b, v, endpoints, active_endpoint_id, view_menu, p)
         }
-        ClientShellOverlay::Settings(v) => {
-            settings_overlay::render_settings_overlay(b, v, s.integration_updates_available, p)
-        }
+        ClientShellOverlay::Settings(v) => settings_overlay::render_settings_overlay(
+            b,
+            v,
+            s.integration_updates_available,
+            view_menu,
+            p,
+        ),
         ClientShellOverlay::WorktreeCreate(v) => {
             worktree_overlays::render_worktree_create_overlay(b, v, p)
         }
@@ -81,6 +86,41 @@ pub(crate) fn render_client_overlay(
         }
         ClientShellOverlay::ContextMenu(_) | ClientShellOverlay::GlobalMenu(_) => None,
     }
+}
+
+/// The key hints a popup shows for its view menu, from the menu's bar
+/// plan: the keys the keymap binds there, so they follow the user's file.
+fn view_hints(menu: Option<&crate::input::keymap::CompiledMenu>) -> String {
+    use crate::input::keymap::SegmentKind;
+
+    let Some(menu) = menu else {
+        return String::new();
+    };
+    let segments = &menu.bar_plan.segments;
+    let mut hints: Vec<(String, &str)> = Vec::new();
+    let body = segments
+        .iter()
+        .filter(|segment| segment.kind != SegmentKind::Exit);
+    let exit = segments
+        .iter()
+        .filter(|segment| segment.kind == SegmentKind::Exit);
+    for segment in body.chain(exit) {
+        match hints.last_mut() {
+            Some((keys, label)) if *label == segment.label => {
+                keys.push('/');
+                keys.push_str(&segment.keys);
+            }
+            _ => hints.push((segment.keys.clone(), &segment.label)),
+        }
+    }
+    hints
+        .into_iter()
+        .map(|(keys, label)| {
+            let keys = keys.replace("↑/↓", "↑↓").replace("←/→", "←→");
+            format!(" {keys} {label}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ·")
 }
 
 pub(crate) fn render_global_menu(
@@ -692,6 +732,7 @@ fn render_navigator_overlay(
     n: &ClientNavigatorOverlay,
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
+    view_menu: Option<&crate::input::keymap::CompiledMenu>,
     p: &Palette,
 ) -> Option<OverlayRender> {
     let a = b.area;
@@ -1007,16 +1048,19 @@ fn render_navigator_overlay(
             Style::default().fg(p.overlay0).bg(p.panel_bg),
         );
     }
+    // While the search field has focus, keys edit the query; otherwise
+    // they are the navigator menu's keys.
+    let hints = if n.search_focused {
+        " search type · move ↑↓/ctrl+n/p · open enter · back esc".to_owned()
+    } else {
+        view_hints(view_menu)
+    };
     put_text(
         b,
         i.x,
         i.bottom() - 1,
         i.width,
-        if n.search_focused {
-            " search type · move ↑↓/ctrl+n/p · open enter · back esc"
-        } else {
-            " ↑↓/j/k rows · ←→ workspace · / search · a/b/w/i/d filter · enter open · esc close"
-        },
+        &hints,
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
     Some(OverlayRender {
@@ -1036,13 +1080,45 @@ fn render_navigator_overlay(
     })
 }
 
-fn help_lines(
+/// One row of the keybind list, before styling.
+enum HelpLine {
+    ProblemsHeading,
+    Problem(String),
+    Group(String),
+    Entry(String, String),
+    Blank,
+    NoMatch,
+}
+
+const HELP_PROBLEMS_HEADING: &str = " keymap problems";
+const HELP_NO_MATCH: &str = " no matching keybinds";
+
+impl HelpLine {
+    fn width(&self, key_width: usize) -> usize {
+        match self {
+            Self::ProblemsHeading => HELP_PROBLEMS_HEADING.chars().count(),
+            Self::Problem(message) | Self::Group(message) => message.chars().count() + 1,
+            Self::Entry(_, label) => key_width + 2 + label.chars().count(),
+            Self::Blank => 0,
+            Self::NoMatch => HELP_NO_MATCH.chars().count(),
+        }
+    }
+}
+
+/// The keybind list: problems in the keymap files first, then one group
+/// per menu. Also returns the width of the key column and, for each group
+/// shown, the line its heading is on.
+fn help_line_items(
     keymap: &crate::input::keymap::CompiledKeymap,
     query: &str,
-    palette: &Palette,
-) -> Vec<(usize, ratatui::text::Line<'static>)> {
-    use ratatui::text::{Line, Span};
-
+) -> (Vec<HelpLine>, usize, Vec<usize>) {
+    let needle = query.to_lowercase();
+    let problems = keymap
+        .diagnostics
+        .iter()
+        .chain(&keymap.conflicts)
+        .filter(|problem| needle.is_empty() || problem.to_lowercase().contains(&needle))
+        .collect::<Vec<_>>();
     let groups =
         crate::input::filter_keybind_help_groups(crate::input::keybind_help_groups(keymap), query);
     let key_width = groups
@@ -1050,58 +1126,158 @@ fn help_lines(
         .flat_map(|(_, entries)| entries.iter().map(|(key, _)| key.chars().count()))
         .max()
         .unwrap_or(8);
-    if groups.is_empty() {
-        let message = " no matching keybinds";
-        return vec![(
-            message.chars().count(),
-            Line::from(Span::styled(
-                message,
-                Style::default().fg(palette.overlay1).bg(palette.panel_bg),
-            )),
-        )];
-    }
-
     let mut lines = Vec::new();
+    if !problems.is_empty() {
+        lines.push(HelpLine::ProblemsHeading);
+        lines.extend(
+            problems
+                .into_iter()
+                .map(|problem| HelpLine::Problem(problem.clone())),
+        );
+        lines.push(HelpLine::Blank);
+    }
+    if groups.is_empty() {
+        lines.push(HelpLine::NoMatch);
+        return (lines, key_width, Vec::new());
+    }
+    let mut group_lines = Vec::new();
     for (group, entries) in groups {
-        lines.push((
-            group.len() + 1,
-            Line::from(Span::styled(
-                format!(" {group}"),
-                Style::default()
-                    .fg(palette.accent)
-                    .bg(palette.panel_bg)
-                    .add_modifier(Modifier::BOLD),
-            )),
-        ));
-        for (key, label) in entries {
-            let padded_key = format!(" {key:<key_width$} ");
-            let width = padded_key.chars().count() + label.chars().count();
-            lines.push((
-                width,
-                Line::from(vec![
+        group_lines.push(lines.len());
+        lines.push(HelpLine::Group(group.into_owned()));
+        lines.extend(
+            entries
+                .into_iter()
+                .map(|(key, label)| HelpLine::Entry(key, label.into_owned())),
+        );
+        lines.push(HelpLine::Blank);
+    }
+    (lines, key_width, group_lines)
+}
+
+fn help_lines(
+    keymap: &crate::input::keymap::CompiledKeymap,
+    query: &str,
+    palette: &Palette,
+) -> Vec<(usize, ratatui::text::Line<'static>)> {
+    use ratatui::text::{Line, Span};
+
+    let (items, key_width, _) = help_line_items(keymap, query);
+    items
+        .into_iter()
+        .map(|item| {
+            let width = item.width(key_width);
+            let line = match item {
+                HelpLine::ProblemsHeading => Line::from(Span::styled(
+                    HELP_PROBLEMS_HEADING,
+                    Style::default()
+                        .fg(palette.red)
+                        .bg(palette.panel_bg)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                HelpLine::Problem(message) => Line::from(Span::styled(
+                    format!(" {message}"),
+                    Style::default().fg(palette.text).bg(palette.panel_bg),
+                )),
+                HelpLine::Group(title) => Line::from(Span::styled(
+                    format!(" {title}"),
+                    Style::default()
+                        .fg(palette.accent)
+                        .bg(palette.panel_bg)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                HelpLine::Entry(key, label) => Line::from(vec![
                     Span::styled(
-                        padded_key,
+                        format!(" {key:<key_width$} "),
                         Style::default()
                             .fg(palette.mauve)
                             .bg(palette.panel_bg)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
-                        label.into_owned(),
+                        label,
                         Style::default().fg(palette.text).bg(palette.panel_bg),
                     ),
                 ]),
-            ));
-        }
-        lines.push((0, Line::raw("")));
+                HelpLine::Blank => Line::raw(""),
+                HelpLine::NoMatch => Line::from(Span::styled(
+                    HELP_NO_MATCH,
+                    Style::default().fg(palette.overlay1).bg(palette.panel_bg),
+                )),
+            };
+            (width, line)
+        })
+        .collect()
+}
+
+/// Where the keybind list sits inside the help popup's border.
+fn help_body(inner: Rect) -> Rect {
+    Rect::new(
+        inner.x,
+        inner.y + 3,
+        inner.width,
+        inner.height.saturating_sub(5),
+    )
+}
+
+/// Rows the keybind list takes when its lines wrap at `width` columns.
+fn wrapped_help_rows(line_widths: &[usize], width: u16) -> usize {
+    let width = usize::from(width.max(1));
+    line_widths
+        .iter()
+        .map(|line_width| line_width.max(&1).div_ceil(width))
+        .sum()
+}
+
+/// The width left for text in `body`, after a scrollbar when the list
+/// does not fit.
+fn help_text_width(line_widths: &[usize], body: Rect) -> u16 {
+    if wrapped_help_rows(line_widths, body.width) > usize::from(body.height.max(1)) {
+        body.width.saturating_sub(1)
+    } else {
+        body.width
     }
-    lines
+}
+
+/// The scroll offset that puts `menu`'s group at the top of the unfiltered
+/// keybind list on a `cols`×`rows` frame, or without wrapping when the
+/// frame size is not known yet.
+pub(crate) fn help_scroll_to_menu(
+    keymap: &crate::input::keymap::CompiledKeymap,
+    menu: crate::input::keymap::MenuId,
+    screen: Option<(u16, u16)>,
+) -> usize {
+    let Some(group) = keymap.help.iter().position(|group| group.menu == menu) else {
+        return 0;
+    };
+    let (items, key_width, group_lines) = help_line_items(keymap, "");
+    let Some(line) = group_lines.get(group).copied() else {
+        return 0;
+    };
+    let widths = items
+        .iter()
+        .map(|item| item.width(key_width))
+        .collect::<Vec<_>>();
+    let body = screen
+        .and_then(|(cols, rows)| popup(Rect::new(0, 0, cols, rows), 76, 22))
+        .map(|popup| {
+            help_body(Rect::new(
+                popup.x + 1,
+                popup.y + 1,
+                popup.width.saturating_sub(2),
+                popup.height.saturating_sub(2),
+            ))
+        });
+    match body {
+        Some(body) => wrapped_help_rows(&widths[..line], help_text_width(&widths, body)),
+        None => line,
+    }
 }
 
 fn render_help_overlay(
     b: &mut Buffer,
     h: &ClientHelpOverlay,
     k: &crate::input::keymap::CompiledKeymap,
+    view_menu: Option<&crate::input::keymap::CompiledMenu>,
     p: &Palette,
 ) -> Option<OverlayRender> {
     use ratatui::widgets::{Paragraph, Widget, Wrap};
@@ -1162,23 +1338,14 @@ fn render_help_overlay(
         None
     };
 
-    let body = Rect::new(i.x, i.y + 3, i.width, i.height.saturating_sub(5));
+    let body = help_body(i);
     let lines = help_lines(k, &h.query, p);
     let viewport_rows = usize::from(body.height.max(1));
-    let wrapped_rows = |width: u16| {
-        let width = usize::from(width.max(1));
-        lines
-            .iter()
-            .map(|(line_width, _)| line_width.max(&1).div_ceil(width))
-            .sum::<usize>()
-    };
-    let needs_scrollbar = wrapped_rows(body.width) > viewport_rows;
-    let text_area = if needs_scrollbar {
-        Rect::new(body.x, body.y, body.width.saturating_sub(1), body.height)
-    } else {
-        body
-    };
-    let total_rows = wrapped_rows(text_area.width);
+    let widths = lines.iter().map(|(width, _)| *width).collect::<Vec<_>>();
+    let text_width = help_text_width(&widths, body);
+    let needs_scrollbar = text_width < body.width;
+    let text_area = Rect::new(body.x, body.y, text_width, body.height);
+    let total_rows = wrapped_help_rows(&widths, text_width);
     let max_scroll = total_rows.saturating_sub(viewport_rows);
     let scroll = h.scroll.min(max_scroll);
     let metrics = crate::pane::ScrollMetrics {
@@ -1219,10 +1386,10 @@ fn render_help_overlay(
         i.x,
         i.bottom() - 1,
         i.width,
-        if h.search_focused {
-            " edit ←→/home/end · kill ^u/^k · yank ^y · scroll ↑↓ · back esc"
+        &if h.search_focused {
+            " edit ←→/home/end · kill ^u/^k · yank ^y · scroll ↑↓ · back esc".to_owned()
         } else {
-            " search / · scroll j/k/↑↓/pgup/pgdn · close esc/enter"
+            view_hints(view_menu)
         },
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
