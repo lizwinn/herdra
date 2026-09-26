@@ -754,6 +754,48 @@ fn reload_local_client_config_keeps_ui_preferences_when_ui_is_invalid() {
 }
 
 #[test]
+fn reload_local_client_config_follows_the_remote_image_paste_key() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let _guard = crate::config::test_config_env_lock().lock().unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "herdr-client-image-paste-key-reload-{}-{}.toml",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let path_string = path.to_string_lossy().to_string();
+    let _env = EnvVarGuard::set(crate::config::CONFIG_PATH_ENV_VAR, &path_string);
+    let reload = |content: &str, key: &mut Option<(KeyCode, KeyModifiers)>| {
+        std::fs::write(&path, content).unwrap();
+        reload_local_client_config(
+            &mut crate::config::SoundConfig::default(),
+            &mut false,
+            &mut false,
+            key,
+            &mut false,
+        );
+    };
+    let mut key = Some((KeyCode::Char('v'), KeyModifiers::CONTROL));
+
+    // The removed [keys] section no longer gates it.
+    reload(
+        "keys = 5\n[remote]\nimage_paste_key = \"alt+v\"\n",
+        &mut key,
+    );
+    assert_eq!(key, Some((KeyCode::Char('v'), KeyModifiers::ALT)));
+
+    // An invalid [remote] section keeps the current key.
+    reload("[remote]\nimage_paste_key = 5\n", &mut key);
+    assert_eq!(key, Some((KeyCode::Char('v'), KeyModifiers::ALT)));
+
+    reload("[remote]\nimage_paste_key = \"\"\n", &mut key);
+    assert_eq!(key, None);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn toast_notify_from_server_is_emitted_even_when_attach_config_was_off() {
     let sound_config = crate::config::SoundConfig::default();
     let mut emitted = None;

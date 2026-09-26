@@ -117,7 +117,7 @@ pub(super) fn reload_local_client_config(
                 *draw_host_cursor = should_draw_host_cursor(loaded.config.ui.host_cursor);
                 *mouse_capture = loaded.config.ui.mouse_capture;
             }
-            if !invalid_section("keys") {
+            if !invalid_section("remote") {
                 *remote_image_paste_key = client_remote_image_paste_key(&loaded.config);
             }
             debug!("reloaded local client config");
