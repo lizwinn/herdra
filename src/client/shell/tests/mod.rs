@@ -39,7 +39,7 @@ pub(super) fn command_leaf(
             width: None,
             height: None,
         },
-        hint: command.into(),
+        hint: None,
         owner: crate::input::keymap::LayerOwner::User,
     }
 }

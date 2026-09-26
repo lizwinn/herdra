@@ -111,7 +111,9 @@ pub(crate) struct CompiledCommand {
     /// Chords that reach this command, space separated.
     pub(crate) path_label: String,
     pub(crate) spec: CommandSpec,
-    pub(crate) hint: String,
+    /// The leaf's own `hint`, if it set one. Never the command text: servers
+    /// send this to clients, which must not learn the commands they run.
+    pub(crate) hint: Option<String>,
     /// Which layer defined the command; plugin commands run on the server
     /// that owns the plugin.
     pub(crate) owner: LayerOwner,
@@ -733,7 +735,7 @@ impl Compiler<'_> {
                         self.commands.push(CompiledCommand {
                             path_label: path_label.clone(),
                             spec: spec.clone(),
-                            hint: leaf.hint.clone().unwrap_or_else(|| default_hint.clone()),
+                            hint: leaf.hint.clone(),
                             owner: node.owner.clone(),
                         });
                         (

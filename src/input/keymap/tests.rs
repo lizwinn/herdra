@@ -574,7 +574,7 @@ fn shared_keymaps_hide_command_text() {
     let keymap = build(&redacted);
     assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
     assert_eq!(keymap.commands[0].path_label, "ctrl+b g");
-    assert_eq!(keymap.commands[0].hint, "git");
+    assert_eq!(keymap.commands[0].hint.as_deref(), Some("git"));
     assert_eq!(redact_commands("prefix {"), None);
 }
 

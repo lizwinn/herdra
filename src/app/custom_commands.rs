@@ -97,7 +97,8 @@ impl App {
                     self.keymap.prefix,
                 ),
                 action: entry.action,
-                description: Some(entry.command.hint.clone()),
+                // Only a hint the user wrote; the command text stays on the server.
+                description: entry.command.hint.clone(),
             })
             .collect()
     }
@@ -626,13 +627,42 @@ mod tests {
                 width: None,
                 height: None,
             },
-            hint: "safe description".into(),
+            hint: Some("safe description".into()),
             owner: crate::input::keymap::LayerOwner::User,
         }
     }
 
     fn install(app: &mut crate::app::App, binding: CompiledCommand) {
         app.endpoint_commands = super::EndpointCommandRegistry::new(&[binding]);
+    }
+
+    #[test]
+    fn manifest_omits_command_text_for_leaves_without_a_hint() {
+        let mut app = test_app();
+        let keymap = crate::input::keymap::CompiledKeymap::build(
+            Some(&crate::input::keymap::KeymapText {
+                source: "keymap.kdl".into(),
+                text: "prefix {\n    z shell \"secret-command --token hidden\"\n    y popup \"other-secret\" \"safe label\"\n}\n".into(),
+            }),
+            &[],
+        );
+        assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+        app.endpoint_commands = super::EndpointCommandRegistry::new(&keymap.commands);
+
+        let manifest = app.client_shell_command_manifest();
+        assert_eq!(manifest.len(), 2);
+        let unhinted = manifest
+            .iter()
+            .find(|command| command.binding_label == "ctrl+b z")
+            .expect("unhinted command");
+        assert_eq!(unhinted.description, None);
+        let hinted = manifest
+            .iter()
+            .find(|command| command.binding_label == "ctrl+b y")
+            .expect("hinted command");
+        assert_eq!(hinted.description.as_deref(), Some("safe label"));
+        let encoded = serde_json::to_string(&manifest).expect("encode manifest");
+        assert!(!encoded.contains("secret"), "{encoded}");
     }
 
     #[test]
