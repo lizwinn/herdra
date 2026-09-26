@@ -240,8 +240,13 @@ impl ClientShellConfig {
             |section: &str| invalid_sections.iter().any(|invalid| invalid == section);
 
         if !invalid_section("keymap") {
-            self.local_keymap_file = config.keymap_file.clone();
-            self.rebuild_keymap();
+            // A rebuilt keymap closes open menus; keep it when the file is
+            // the same.
+            if self.local_keymap_file != config.keymap_file {
+                self.local_keymap_file = config.keymap_file.clone();
+                self.rebuild_keymap();
+            }
+            diagnostics.extend(self.keymap.diagnostics.iter().cloned());
         }
 
         if !invalid_section("ui") {
@@ -517,6 +522,32 @@ mod tests {
 
         assert!(std::sync::Arc::ptr_eq(&state.config.keymap, &keymap));
         assert!(state.local_config_diagnostic.is_some());
+    }
+
+    #[test]
+    fn live_reload_keeps_open_menus_unless_the_keymap_changed() {
+        let disk = DiskConfig::new("unchanged-keymap", "base classic\n");
+        let config = Config {
+            keymap_file: Some(keymap_file("base classic\n")),
+            ..Config::default()
+        };
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        state.set_snapshot(Box::new(super::super::tests::snapshot()));
+        state.handle_input_bytes(&[0x02]);
+        state.handle_input_bytes(b"r");
+        assert_eq!(state.mode_name(), "resize");
+
+        state.reload_client_config();
+        assert_eq!(
+            state.mode_name(),
+            "resize",
+            "an unchanged keymap keeps the sticky menu open"
+        );
+
+        disk.write_keymap("base classic prefix=ctrl+a\n");
+        state.reload_client_config();
+        assert_eq!(state.mode, ClientShellMode::Terminal);
+        assert_eq!(state.config.keymap.prefix.0, KeyCode::Char('a'));
     }
 
     #[test]

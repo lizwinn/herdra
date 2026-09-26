@@ -865,8 +865,13 @@ impl App {
             |section: &str| invalid_sections.iter().any(|invalid| invalid == section);
 
         if !invalid_section("keymap") {
-            self.user_keymap_file = config.keymap_file.clone();
-            self.rebuild_keymap();
+            // Rebuilding mints new command ids and sends every client a new
+            // keymap, which closes their menus; only do it for a new file.
+            if self.user_keymap_file != config.keymap_file {
+                self.user_keymap_file = config.keymap_file.clone();
+                self.rebuild_keymap();
+            }
+            diagnostics.extend(self.keymap.diagnostics.iter().cloned());
         }
 
         if !invalid_section("ui") {
@@ -1844,6 +1849,62 @@ mod tests {
         );
         assert_eq!(keymap_binding(&app, "ctrl+a", "m"), Some("workspace.new"));
         assert_eq!(app.keymap_revision, revision, "clients keep their keymap");
+    }
+
+    #[test]
+    fn reload_config_rebuilds_the_keymap_only_when_keymap_kdl_changes() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-keymap-unchanged");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "").unwrap();
+        write_keymap(
+            &path,
+            "base prefix=ctrl+a\nprefix {\n  g shell \"true\"\n  q tab.nwe\n}\n",
+        );
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let unknown_action = |report: &crate::config::ConfigReloadReport| {
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.contains("unknown action \"tab.nwe\""))
+        };
+
+        let mut app = test_app();
+        let first = app.reload_config();
+        let keymap = std::sync::Arc::clone(&app.keymap);
+        let revision = app.keymap_revision;
+        let command_ids = app
+            .client_shell_command_manifest()
+            .into_iter()
+            .map(|command| command.command_id)
+            .collect::<Vec<_>>();
+        let unchanged = app.reload_config();
+        let unchanged_keymap = std::sync::Arc::clone(&app.keymap);
+        let unchanged_revision = app.keymap_revision;
+        let unchanged_command_ids = app
+            .client_shell_command_manifest()
+            .into_iter()
+            .map(|command| command.command_id)
+            .collect::<Vec<_>>();
+        write_keymap(&path, "base prefix=ctrl+x\nprefix { g shell \"true\" }\n");
+        let changed = app.reload_config();
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        assert!(unknown_action(&first), "{:?}", first.diagnostics);
+        assert!(
+            unknown_action(&unchanged),
+            "an unchanged keymap still reports its problems: {:?}",
+            unchanged.diagnostics
+        );
+        assert!(std::sync::Arc::ptr_eq(&unchanged_keymap, &keymap));
+        assert_eq!(unchanged_revision, revision);
+        assert_eq!(command_ids.len(), 1);
+        assert_eq!(unchanged_command_ids, command_ids);
+        assert_eq!(changed.status, crate::config::ConfigReloadStatus::Applied);
+        assert!(!std::sync::Arc::ptr_eq(&app.keymap, &keymap));
+        assert!(app.keymap_revision > revision);
+        assert_eq!(app.keymap.prefix.0, KeyCode::Char('x'));
     }
 
     #[test]
