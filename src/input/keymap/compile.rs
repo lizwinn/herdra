@@ -245,6 +245,10 @@ impl CompiledKeymap {
                 &mut diagnostics,
             ));
         }
+        let sources = layers
+            .iter()
+            .map(|layer| (layer.owner.clone(), layer.source.clone()))
+            .collect();
         let (merged, detached) = merge_layers(layers, &mut conflicts);
         let mut compiler = Compiler {
             menus: Vec::new(),
@@ -252,8 +256,17 @@ impl CompiledKeymap {
             menu_ids: Vec::new(),
             pending_opens: Vec::new(),
             diagnostics: &mut diagnostics,
+            conflicts: &mut conflicts,
+            sources,
         };
-        compiler.add_menu(None, None, TopLevel::menu(), &merged, &[]);
+        compiler.add_menu(
+            None,
+            None,
+            TopLevel::menu(),
+            &merged,
+            &[],
+            &LayerOwner::Builtin,
+        );
         // Named menus whose key was rebound or unbound stay reachable by
         // `menu.open`, unless a later layer reused their id.
         for node in detached {
@@ -266,7 +279,7 @@ impl CompiledKeymap {
                 .is_some_and(|id| compiler.menu_ids.iter().any(|(existing, _)| existing == id));
             if !taken {
                 let children = menu.children.clone();
-                compiler.add_menu(None, None, menu, &children, &[]);
+                compiler.add_menu(None, None, menu, &children, &[], &node.owner);
             }
         }
         compiler.resolve_opens();
@@ -287,6 +300,7 @@ impl CompiledKeymap {
                     },
                     &[],
                     &[],
+                    &LayerOwner::Builtin,
                 );
             }
         }
@@ -549,12 +563,32 @@ struct Compiler<'a> {
     commands: Vec<CompiledCommand>,
     menu_ids: Vec<(String, MenuId)>,
     /// `menu.open` bindings waiting for every menu id to be known:
-    /// (menu, binding index, target id, path label).
-    pending_opens: Vec<(MenuId, usize, String, String)>,
+    /// (menu, binding index, target id, path label, owner).
+    pending_opens: Vec<(MenuId, usize, String, String, LayerOwner)>,
+    /// Problems in the user's keymap file.
     diagnostics: &'a mut Vec<String>,
+    /// Problems in plugin and built-in layers.
+    conflicts: &'a mut Vec<String>,
+    /// Each layer's owner and file, to name where a problem came from.
+    sources: Vec<(LayerOwner, String)>,
 }
 
 impl Compiler<'_> {
+    /// Credit a problem to the layer that caused it: the user's own file
+    /// shows in diagnostics, a plugin's or the base tree's in conflicts.
+    fn report(&mut self, owner: &LayerOwner, message: String) {
+        if *owner == LayerOwner::User {
+            self.diagnostics.push(format!("keymap: {message}"));
+            return;
+        }
+        let source = self
+            .sources
+            .iter()
+            .find(|(layer, _)| layer == owner)
+            .map_or_else(|| owner.label(), |(_, source)| source.clone());
+        self.conflicts.push(format!("keymap {source}: {message}"));
+    }
+
     fn add_menu(
         &mut self,
         parent: Option<MenuId>,
@@ -562,6 +596,7 @@ impl Compiler<'_> {
         meta: RawMenu,
         children: &[RawNode],
         views_in_scope: &[ViewKind],
+        owner: &LayerOwner,
     ) -> MenuId {
         let id = MenuId(self.menus.len() as u16);
         let path_label = match (parent, entry_chord) {
@@ -612,9 +647,10 @@ impl Compiler<'_> {
                 .iter()
                 .any(|(existing, _)| existing == menu_id)
             {
-                self.diagnostics.push(format!(
-                    "keymap: menu id {menu_id:?} is used more than once; keeping the first"
-                ));
+                self.report(
+                    owner,
+                    format!("menu id {menu_id:?} is used more than once; keeping the first"),
+                );
             } else {
                 self.menu_ids.push((menu_id.clone(), id));
             }
@@ -628,8 +664,13 @@ impl Compiler<'_> {
         for child in children {
             if let Some((binding, open)) = self.compile_child(id, child, &scope, top_level) {
                 if let Some((target, path_label)) = open {
-                    self.pending_opens
-                        .push((id, bindings.len(), target, path_label));
+                    self.pending_opens.push((
+                        id,
+                        bindings.len(),
+                        target,
+                        path_label,
+                        child.owner.clone(),
+                    ));
                 }
                 bindings.push(binding);
             }
@@ -640,7 +681,7 @@ impl Compiler<'_> {
 
     fn resolve_opens(&mut self) {
         let mut dropped = Vec::new();
-        for (menu, index, target, path_label) in std::mem::take(&mut self.pending_opens) {
+        for (menu, index, target, path_label, owner) in std::mem::take(&mut self.pending_opens) {
             match self.menu_ids.iter().find(|(id, _)| *id == target) {
                 Some((_, target_menu)) => {
                     let title = self.menus[target_menu.index()].title.clone();
@@ -652,9 +693,10 @@ impl Compiler<'_> {
                     binding.description = format!("+{title}");
                 }
                 None => {
-                    self.diagnostics.push(format!(
-                        "keymap: {path_label} opens unknown menu id {target:?}"
-                    ));
+                    self.report(
+                        &owner,
+                        format!("{path_label} opens unknown menu id {target:?}"),
+                    );
                     dropped.push((menu, index));
                 }
             }
@@ -681,6 +723,7 @@ impl Compiler<'_> {
                     menu.clone(),
                     &menu.children,
                     scope,
+                    &node.owner,
                 );
                 let title = self.menus[child.index()].title.clone();
                 Some((
@@ -716,11 +759,12 @@ impl Compiler<'_> {
                         exits_itself = entry.exits_itself;
                         if let Some(view) = entry.view {
                             if !top_level && !scope.contains(&view) {
-                                self.diagnostics.push(format!(
-                                    "keymap: {path_label} runs {}, which only works inside a menu with view={}",
+                                let message = format!(
+                                    "{path_label} runs {}, which only works inside a menu with view={}",
                                     entry.id,
                                     view.id()
-                                ));
+                                );
+                                self.report(&node.owner, message);
                             }
                         }
                         (

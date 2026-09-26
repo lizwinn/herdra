@@ -821,3 +821,35 @@ prefix {
     assert!(shared.menu(menu).sticky);
     assert_eq!(shared.menu(menu).bindings.len(), 1);
 }
+
+#[test]
+fn shared_keymaps_keep_menu_flags_after_titles_that_look_like_commands() {
+    let text = "prefix { p pane replace sticky { h pane.focus.left } }";
+    let redacted = redact_commands(text).expect("valid KDL");
+    let original = build(text);
+    let shared = build(&redacted);
+    assert!(shared.diagnostics.is_empty(), "{:?}", shared.diagnostics);
+    assert_eq!(describe(&shared), describe(&original));
+    let pane = shared.menu_by_path("ctrl+b p").expect("pane menu");
+    assert_eq!(shared.menu(pane).bindings.len(), 1, "replace survives");
+}
+
+#[test]
+fn compile_problems_are_credited_to_the_layer_that_caused_them() {
+    let plugin = KeymapText {
+        source: "example.layout/keymap.kdl".to_owned(),
+        text: "prefix { u menu.open nowhere }".to_owned(),
+    };
+    let keymap = CompiledKeymap::build(
+        Some(&user("prefix { m menu.open elsewhere }")),
+        &[("example.layout".to_owned(), plugin)],
+    );
+    assert_eq!(
+        keymap.diagnostics,
+        ["keymap: ctrl+b m opens unknown menu id \"elsewhere\""]
+    );
+    assert_eq!(
+        keymap.conflicts,
+        ["keymap example.layout/keymap.kdl: ctrl+b u opens unknown menu id \"nowhere\""]
+    );
+}
