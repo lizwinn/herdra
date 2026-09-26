@@ -301,6 +301,10 @@ pub fn config_diagnostic_summary(diagnostics: &[String]) -> Option<String> {
     Some(format!("{target}{impact}; herdr config check"))
 }
 
+/// Read config.toml and keymap.kdl for a live reload.
+///
+/// The keymap is not compiled here: each reloader compiles it only when the
+/// file changed and reports the diagnostics of the keymap it runs.
 pub fn load_live_config() -> Result<LoadedConfig, Vec<String>> {
     let path = config_path();
     let mut loaded = match read_optional_config(&path) {
@@ -323,10 +327,6 @@ pub fn load_live_config() -> Result<LoadedConfig, Vec<String>> {
         // prefix, for the default tree.
         loaded.diagnostics.extend(syntax_errors);
         loaded.invalid_sections.push("keymap".to_owned());
-    } else {
-        loaded
-            .diagnostics
-            .extend(loaded.config.keymap().diagnostics);
     }
     Ok(loaded)
 }
