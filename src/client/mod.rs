@@ -1288,6 +1288,9 @@ async fn run_client_loop(
                             &endpoint_id,
                             agent_view_projection_supported,
                         );
+                        // Servers that support keymap_projection send their
+                        // layers on attach; keep none from the old connection.
+                        shell.reset_endpoint_keymap_projection(&endpoint_id);
                         shell.compose(state.reported_size.0, state.reported_size.1)
                     });
                     let reader_quit = writer.stop_handle();

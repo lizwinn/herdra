@@ -826,9 +826,10 @@ impl App {
         self.refresh_plugin_keymap_warnings();
     }
 
-    /// Whether a client needs the keymap projection: the server contributes
-    /// layers, the client uses the server's keymap, or the client holds
-    /// layers that must be cleared.
+    /// Whether an attached client needs a new keymap projection after the
+    /// keymap changed: the server contributes layers, the client uses the
+    /// server's keymap, or the client holds layers that must be cleared.
+    /// Clients always receive one projection on attach.
     pub(crate) fn keymap_projection_needed(
         &self,
         uses_endpoint_keybindings: bool,
