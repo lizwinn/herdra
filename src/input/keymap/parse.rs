@@ -766,8 +766,11 @@ pub(crate) fn redact_commands(text: &str) -> Option<String> {
     let mut document = text.parse::<KdlDocument>().ok()?;
     fn walk(document: &mut KdlDocument) {
         for node in document.nodes_mut() {
+            // Menus have no command text; their second word is a flag such
+            // as `replace` (a menu titled `pane` must keep it).
             if let Some(children) = node.children_mut().as_mut() {
                 walk(children);
+                continue;
             }
             let positional = node
                 .entries()
