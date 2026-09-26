@@ -31,8 +31,8 @@ pub const AGENT_VIEW_PROJECTION_CAPABILITY: &str = "agent_view_projection";
 pub const AGENT_VIEW_PROJECTION_KIND: &str = "endpoint.agent-view.v1";
 pub const AGENT_COMPLETIONS_CAPABILITY: &str = "agent_completions";
 pub const AGENT_COMPLETIONS_KIND: &str = "endpoint.agent-completions.v1";
-pub const KEYMAP_PROJECTION_CAPABILITY: &str = "keymap_projection";
-pub const KEYMAP_PROJECTION_KIND: &str = "endpoint.keymap.v1";
+pub const KEYMAP_PROJECTION_CAPABILITY: &str = "herdra.keymap_projection";
+pub const KEYMAP_PROJECTION_KIND: &str = "herdra.endpoint.keymap.v1";
 
 /// Optional companion control: the keymap layers a server contributes, so
 /// clients resolve keys with the server's plugin menus. Clients that do not
