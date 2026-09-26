@@ -57,6 +57,13 @@ pub(crate) fn load_plugin_manifest(
     api::plugins::load_plugin_manifest(path, enabled)
 }
 
+pub(crate) fn attach_offline_plugin_keymap_warnings(
+    plugins: &mut [crate::api::schema::InstalledPluginInfo],
+    user_keymap: Option<&crate::input::keymap::KeymapText>,
+) {
+    api::plugins::attach_offline_plugin_keymap_warnings(plugins, user_keymap);
+}
+
 /// Full application: AppState + runtime concerns (event channels, async I/O).
 #[derive(Debug, Clone)]
 pub(crate) struct OverlayPaneState {
@@ -643,6 +650,7 @@ impl App {
             keymap_revision: 1,
             endpoint_commands,
         };
+        app.refresh_plugin_keymap_warnings();
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
         app.configure_window_title(&config.ui.window_title);
         app
@@ -801,7 +809,8 @@ impl App {
     }
 
     /// Recompile the server keymap from the user's file and plugin trees,
-    /// and mint command ids for its command keys.
+    /// mint command ids for its command keys, and update plugin keymap
+    /// warnings, which depend on the user's base and prefix.
     pub(crate) fn rebuild_keymap(&mut self) {
         self.keymap = std::sync::Arc::new(crate::input::keymap::CompiledKeymap::build(
             self.user_keymap_file.as_ref(),
@@ -814,6 +823,7 @@ impl App {
         self.keymap_revision = self.keymap_revision.saturating_add(1);
         self.endpoint_commands =
             custom_commands::EndpointCommandRegistry::new(&self.keymap.commands);
+        self.refresh_plugin_keymap_warnings();
     }
 
     /// Whether a client needs the keymap projection: the server contributes

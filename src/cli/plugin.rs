@@ -1105,9 +1105,26 @@ fn plugin_matches_github_source(plugin: &InstalledPluginInfo, source: &GithubPlu
         && plugin.source.subdir.as_deref() == source.subdir.as_deref()
 }
 
+/// Plugin keymap warnings for commands that run without a server: conflicts
+/// with the user's keymap and the other plugins.
+fn attach_offline_keymap_warnings(plugins: &mut [InstalledPluginInfo]) {
+    if plugins.iter().all(|plugin| plugin.keymap.is_none()) {
+        return;
+    }
+    let user_keymap = crate::config::Config::load().config.keymap_file;
+    crate::app::attach_offline_plugin_keymap_warnings(plugins, user_keymap.as_ref());
+}
+
 fn offline_plugin_link_response(params: &PluginLinkParams) -> std::io::Result<serde_json::Value> {
     let plugin = load_cli_plugin_manifest(Path::new(&params.path), params.enabled)?;
     persist_plugin_offline(&plugin)?;
+    let mut plugins = crate::persist::plugin_registry::load();
+    plugins.retain(|entry| entry.plugin_id != plugin.plugin_id);
+    plugins.push(plugin);
+    attach_offline_keymap_warnings(&mut plugins);
+    let plugin = plugins
+        .pop()
+        .ok_or_else(|| std::io::Error::other("linked plugin is missing"))?;
     serde_json::to_value(SuccessResponse {
         id: "cli:plugin".into(),
         result: ResponseResult::PluginLinked { plugin },
@@ -1120,7 +1137,9 @@ fn offline_plugin_list_response(params: &PluginListParams) -> std::io::Result<se
     let mut plugins =
         crate::persist::plugin_registry::reload_manifests(entries, |path, enabled| {
             crate::app::load_plugin_manifest(path, enabled).map_err(|(_, msg)| msg)
-        })
+        });
+    attach_offline_keymap_warnings(&mut plugins);
+    let mut plugins = plugins
         .into_iter()
         .filter(|plugin| {
             params

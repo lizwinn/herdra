@@ -203,10 +203,9 @@ pub(crate) fn load_plugin_manifest(
 
     let keymap = validate_plugin_keymap(raw.keymap.as_deref(), &plugin_root, &plugin_id)?;
 
+    // Keymap conflicts depend on the user's keymap and the other plugins, so
+    // the app adds them when it merges this tree (see `collect_plugin_keymaps`).
     let mut warnings = validate_event_names(&events);
-    if let Some(keymap) = &keymap {
-        warnings.extend(plugin_keymap_warnings(&plugin_root, &plugin_id, keymap));
-    }
     if platforms.is_none() {
         warnings.push("manifest does not declare platforms; platform support unknown".to_string());
     }
@@ -272,21 +271,6 @@ fn validate_plugin_keymap(
         return Err(("invalid_plugin_keymap", diagnostics.join("; ")));
     }
     Ok(Some(keymap.to_owned()))
-}
-
-fn plugin_keymap_warnings(
-    plugin_root: &std::path::Path,
-    plugin_id: &str,
-    keymap: &str,
-) -> Vec<String> {
-    let Ok(text) = std::fs::read_to_string(plugin_root.join(keymap)) else {
-        return Vec::new();
-    };
-    let layer = crate::input::keymap::KeymapText {
-        source: format!("{plugin_id}/{keymap}"),
-        text,
-    };
-    crate::input::keymap::CompiledKeymap::build(None, &[(plugin_id.to_owned(), layer)]).conflicts
 }
 
 fn validate_min_herdr_version(value: Option<&str>) -> Result<String, (&'static str, String)> {

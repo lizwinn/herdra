@@ -34,11 +34,21 @@ impl App {
             .into_iter()
             .map(|plugin| (plugin.plugin_id.clone(), plugin))
             .collect();
+        // Plugin hooks refresh the registry on every event: compile only when
+        // a plugin tree changed, and otherwise reuse the keymap's conflicts.
         let plugin_keymaps = collect_plugin_keymaps(&self.state.installed_plugins);
         if plugin_keymaps != self.plugin_keymaps {
             self.plugin_keymaps = plugin_keymaps;
             self.rebuild_keymap();
+        } else {
+            self.refresh_plugin_keymap_warnings();
         }
+    }
+
+    /// List each plugin's keymap problems, as merged into the running keymap
+    /// on the user's base and prefix, in its warnings.
+    pub(crate) fn refresh_plugin_keymap_warnings(&mut self) {
+        attach_plugin_keymap_warnings(self.state.installed_plugins.values_mut(), &self.keymap);
     }
 
     fn refresh_installed_plugins(&mut self) -> std::io::Result<()> {
@@ -89,6 +99,13 @@ impl App {
         }) {
             return encode_error(id, "plugin_registry_save_failed", err.to_string());
         }
+        // The registry entry carries the keymap warnings from merging it.
+        let plugin = self
+            .state
+            .installed_plugins
+            .get(&plugin.plugin_id)
+            .cloned()
+            .unwrap_or(plugin);
         encode_success(id, ResponseResult::PluginLinked { plugin })
     }
 
@@ -800,6 +817,48 @@ pub(crate) fn collect_plugin_keymaps(
     keymaps
 }
 
+/// Replace each plugin's keymap warnings with the problems its tree has in
+/// `keymap`: bindings it could not claim and problems in its file. Keymap
+/// diagnostics name their source, which for a plugin tree is
+/// `<plugin id>/<file>` (see `collect_plugin_keymaps`).
+fn attach_plugin_keymap_warnings<'a>(
+    plugins: impl IntoIterator<Item = &'a mut InstalledPluginInfo>,
+    keymap: &crate::input::keymap::CompiledKeymap,
+) {
+    for plugin in plugins {
+        let prefix = format!("keymap {}/", plugin.plugin_id);
+        plugin
+            .warnings
+            .retain(|warning| !warning.starts_with(&prefix));
+        plugin.warnings.extend(
+            keymap
+                .conflicts
+                .iter()
+                .filter(|conflict| conflict.starts_with(&prefix))
+                .cloned(),
+        );
+    }
+}
+
+/// Keymap warnings for plugin commands that run without a server: merge the
+/// enabled plugin trees onto the user's keymap once and attach each plugin's
+/// problems.
+pub(crate) fn attach_offline_plugin_keymap_warnings(
+    plugins: &mut [InstalledPluginInfo],
+    user_keymap: Option<&crate::input::keymap::KeymapText>,
+) {
+    let registry = plugins
+        .iter()
+        .map(|plugin| (plugin.plugin_id.clone(), plugin.clone()))
+        .collect();
+    let plugin_keymaps = collect_plugin_keymaps(&registry);
+    if plugin_keymaps.is_empty() {
+        return;
+    }
+    let keymap = crate::input::keymap::CompiledKeymap::build(user_keymap, &plugin_keymaps);
+    attach_plugin_keymap_warnings(plugins.iter_mut(), &keymap);
+}
+
 fn plugin_manifest_available(plugin: &InstalledPluginInfo) -> bool {
     !plugin.warnings.iter().any(|warning| {
         warning.starts_with(crate::persist::plugin_registry::MANIFEST_UNAVAILABLE_WARNING_PREFIX)
@@ -1231,19 +1290,8 @@ command = ["true"]
             load_plugin_manifest(&root.display().to_string(), true).expect("plugin keymap loads");
         assert_eq!(plugin.keymap.as_deref(), Some("keymap.kdl"));
         assert!(
-            plugin
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("v is already bound by builtin")),
-            "{:?}",
-            plugin.warnings
-        );
-        assert!(
-            plugin
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("unknown action")),
-            "{:?}",
+            plugin.warnings.is_empty(),
+            "loading a manifest does not compile keymaps: {:?}",
             plugin.warnings
         );
 
@@ -1251,6 +1299,24 @@ command = ["true"]
         let previous_revision = app.keymap_revision;
         app.replace_installed_plugins(vec![plugin.clone()]);
         assert!(app.keymap_revision > previous_revision);
+        let warnings = |app: &App| {
+            app.state.installed_plugins["example.layout"]
+                .warnings
+                .clone()
+        };
+        let merged = warnings(&app);
+        assert!(
+            merged
+                .iter()
+                .any(|warning| warning.contains("v is already bound by builtin")),
+            "{merged:?}"
+        );
+        assert!(
+            merged
+                .iter()
+                .any(|warning| warning.contains("unknown action")),
+            "{merged:?}"
+        );
         let pane_menu = app.keymap.menu_by_path("ctrl+b p").expect("pane menu");
         assert!(app
             .keymap
@@ -1286,12 +1352,102 @@ command = ["true"]
             app.keymap_revision, revision,
             "unchanged plugins keep the keymap"
         );
+        assert_eq!(warnings(&app), merged, "a registry refresh keeps them");
 
         let mut disabled = plugin;
         disabled.enabled = false;
         app.replace_installed_plugins(vec![disabled]);
         assert!(app.keymap_revision > revision);
         assert!(app.keymap_projection("boot").plugins.is_empty());
+        assert!(warnings(&app).is_empty(), "{:?}", warnings(&app));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_keymap_warnings_follow_the_user_prefix() {
+        let root = unique_temp_path("plugin-keymap-prefix");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.prefix"
+name = "Prefix"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+keymap = "keymap.kdl"
+
+[[actions]]
+id = "apply"
+title = "Apply"
+command = ["true"]
+"#,
+        );
+        std::fs::write(root.join("keymap.kdl"), "ctrl+a plugin apply\n").unwrap();
+        let plugin =
+            load_plugin_manifest(&root.display().to_string(), true).expect("plugin keymap loads");
+        let conflict = |app: &App| {
+            app.state.installed_plugins["example.prefix"]
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ctrl+a is already bound by builtin"))
+        };
+        let with_keymap = |text: Option<&str>| crate::config::Config {
+            keymap_file: text.map(|text| crate::input::keymap::KeymapText {
+                source: "keymap.kdl".into(),
+                text: text.into(),
+            }),
+            ..crate::config::Config::default()
+        };
+
+        let mut app = test_app();
+        app.replace_installed_plugins(vec![plugin.clone()]);
+        assert!(!conflict(&app), "ctrl+a is free under the ctrl+b prefix");
+
+        app.apply_live_config(&with_keymap(Some("base prefix=ctrl+a\n")), &[], &[], false);
+        assert!(conflict(&app), "{:?}", app.state.installed_plugins);
+        app.replace_installed_plugins(vec![plugin.clone()]);
+        assert!(conflict(&app), "an event refresh keeps the prefix conflict");
+
+        app.apply_live_config(&with_keymap(None), &[], &[], false);
+        assert!(!conflict(&app), "{:?}", app.state.installed_plugins);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn offline_plugin_keymap_warnings_use_the_user_keymap() {
+        let root = unique_temp_path("plugin-keymap-offline");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.offline"
+name = "Offline"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+keymap = "keymap.kdl"
+
+[[actions]]
+id = "apply"
+title = "Apply"
+command = ["true"]
+"#,
+        );
+        std::fs::write(root.join("keymap.kdl"), "ctrl+a plugin apply\n").unwrap();
+        let plugin =
+            load_plugin_manifest(&root.display().to_string(), true).expect("plugin keymap loads");
+        let user = crate::input::keymap::KeymapText {
+            source: "keymap.kdl".into(),
+            text: "base prefix=ctrl+a\n".into(),
+        };
+
+        let mut plugins = vec![plugin.clone()];
+        attach_offline_plugin_keymap_warnings(&mut plugins, None);
+        assert!(plugins[0].warnings.is_empty(), "{:?}", plugins[0].warnings);
+        attach_offline_plugin_keymap_warnings(&mut plugins, Some(&user));
+        assert_eq!(plugins[0].warnings.len(), 1, "{:?}", plugins[0].warnings);
+        assert!(plugins[0].warnings[0].contains("ctrl+a is already bound by builtin"));
 
         let _ = std::fs::remove_dir_all(root);
     }
