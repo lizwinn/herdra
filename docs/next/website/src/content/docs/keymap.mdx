@@ -104,6 +104,7 @@ Your file is laid over the default tree by chord path.
 - **Change one digit** of a `1..9` range by writing that digit alone. The other eight keep working: `prefix { a { "9" none } }` removes only `ctrl+b a 9`.
 - **Change a menu** by writing it again. Flags you write override the menu's own, keys you write are added or changed, and the rest stay: `prefix { t sticky {} }` makes the tab menu sticky. This is also how you name a built-in menu: `prefix { t id=tabs {} }` lets `menu.open tabs` open it.
 - **Replace a menu's keys** with `replace`: `prefix { p replace { ... } }` swaps every key in the pane menu for the ones you write. The menu keeps its title, flags, and id unless you set new ones.
+- **Menus without a key.** A top-level `menu "Extras" id=extras sticky { ... }` declares a menu that only `menu.open extras` reaches, from a leaf in any menu or from a chord at the top level. Writing `menu id=extras { ... }` again adds to it.
 - **Named menus outlive their key.** A menu with an `id=` stays reachable through `menu.open` after you rebind or remove its key, or `replace` its parent. With `prefix { p { r none } }`, `ctrl+b p r` is gone, but `alt+r menu.open resize` still opens resize.
 - **Move the prefix** with `base prefix=ctrl+a`.
 - **Start from another tree** with `base classic` for Herdr's one-key layout (`ctrl+b c` for a new tab), or `base none` to build everything yourself.
@@ -486,7 +487,7 @@ Plugins can ship their own `keymap.kdl` that adds keys and menus to this tree. H
 
 | Command | Does |
 | --- | --- |
-| `herdr keymap print [--json]` | Show the effective tree, including where each key came from. It asks the running server, so plugin menus appear; with no server running it reads your files. |
+| `herdr keymap print [--json] [--node PATH]` | Show the effective tree, including where each key came from, or one menu with `--node "ctrl+b p"`. It asks the running server, so plugin menus appear; with no server running it reads your files. |
 | `herdr keymap default [herdra\|classic]` | Print a built-in tree. |
 | `herdr keymap check [FILE]` | Check a keymap file and print its problems. |
 | `herdr keymap path` | Print where Herdra reads `keymap.kdl`. |
