@@ -150,6 +150,8 @@ impl CompiledCommand {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HelpGroup {
+    /// The menu whose keys the group lists.
+    pub(crate) menu: MenuId,
     pub(crate) title: String,
     pub(crate) entries: Vec<(String, String)>,
 }
@@ -284,8 +286,9 @@ impl CompiledKeymap {
         }
         compiler.resolve_opens();
         // Views can also open without a key (the mobile switcher, resuming
-        // copy mode on refocus). Give views that no menu attaches an empty,
-        // unreachable menu so those paths still work.
+        // copy mode on refocus, a mouse click, a leaf that runs app.help).
+        // Give views that no menu attaches an empty, unreachable menu so
+        // those paths still work.
         for view in ViewKind::ALL {
             if !compiler.menus.iter().any(|menu| menu.view == Some(view)) {
                 compiler.add_menu(
@@ -317,6 +320,16 @@ impl CompiledKeymap {
                 CompiledTarget::Back,
                 "back",
             ),
+            // `?` in any menu that does not bind it lists the keys of that
+            // menu, over the menus that stay open under the list.
+            CompiledBinding {
+                exit: Some(ExitPolicy::Stay),
+                ..common_binding(
+                    (KeyCode::Char('?'), KeyModifiers::empty()),
+                    CompiledTarget::Action(CatalogAction::Fixed(crate::input::KeybindAction::Help)),
+                    "keybinds",
+                )
+            },
         ];
         let mut keymap = Self {
             menus,
@@ -417,7 +430,21 @@ impl CompiledKeymap {
                 continue;
             }
             let (label, kind) = match &binding.target {
-                CompiledTarget::Enter(_) => (format!("+{}", binding.hint), SegmentKind::Submenu),
+                // A menu that opens a popup view reads as the action that
+                // opens the popup: its keys show in the popup, not here.
+                CompiledTarget::Enter(child) => match self.menu(*child).view {
+                    Some(ViewKind::Help) => {
+                        help.push(BarSegment {
+                            keys: display_label(binding.chord),
+                            label: binding.hint.clone(),
+                            kind: SegmentKind::Help,
+                            action_id: None,
+                        });
+                        continue;
+                    }
+                    Some(view) if view.is_overlay() => (binding.hint.clone(), SegmentKind::Action),
+                    _ => (format!("+{}", binding.hint), SegmentKind::Submenu),
+                },
                 CompiledTarget::Action(CatalogAction::Fixed(crate::input::KeybindAction::Help)) => {
                     help.push(BarSegment {
                         keys: display_label(binding.chord),
@@ -506,7 +533,11 @@ impl CompiledKeymap {
             } else {
                 self.badge_path(MenuId(index as u16))
             };
-            groups.push(HelpGroup { title, entries });
+            groups.push(HelpGroup {
+                menu: MenuId(index as u16),
+                title,
+                entries,
+            });
         }
         groups
     }
@@ -616,8 +647,14 @@ impl Compiler<'_> {
             _ => String::new(),
         };
         let view = meta.view;
-        let sticky = meta.sticky.unwrap_or(view == Some(ViewKind::Copy));
+        let sticky = meta
+            .sticky
+            .unwrap_or(view.is_some_and(ViewKind::sticky_by_default));
         let anchor = meta.anchor.unwrap_or(view == Some(ViewKind::Copy));
+        let bar = meta.bar.or_else(|| {
+            view.filter(|view| view.is_overlay())
+                .map(|_| BarVisibility::Hidden)
+        });
         let title = meta
             .title
             .clone()
@@ -636,7 +673,7 @@ impl Compiler<'_> {
             } else {
                 Unmatched::Cancel
             }),
-            bar: meta.bar,
+            bar,
             fallthrough: meta.fallthrough.unwrap_or(false),
             bindings: Vec::new(),
             bar_plan: BarPlan::default(),
@@ -685,12 +722,13 @@ impl Compiler<'_> {
             match self.menu_ids.iter().find(|(id, _)| *id == target) {
                 Some((_, target_menu)) => {
                     let title = self.menus[target_menu.index()].title.clone();
+                    let description = self.enter_description(*target_menu);
                     let binding = &mut self.menus[menu.index()].bindings[index];
                     binding.target = CompiledTarget::Enter(*target_menu);
                     if binding.hint.is_empty() {
-                        binding.hint = title.clone();
+                        binding.hint = title;
                     }
-                    binding.description = format!("+{title}");
+                    binding.description = description;
                 }
                 None => {
                     self.report(
@@ -704,6 +742,16 @@ impl Compiler<'_> {
         dropped.sort_by_key(|(_, index)| std::cmp::Reverse(*index));
         for (menu, index) in dropped {
             self.menus[menu.index()].bindings.remove(index);
+        }
+    }
+
+    /// What the help list says a key that opens `menu` does: `+title`, or
+    /// for a popup view, what the action that opens it says.
+    fn enter_description(&self, menu: MenuId) -> String {
+        let menu = &self.menus[menu.index()];
+        match menu.view.and_then(ViewKind::opener) {
+            Some(opener) => opener.description.to_owned(),
+            None => format!("+{}", menu.title),
         }
     }
 
@@ -732,8 +780,8 @@ impl Compiler<'_> {
                         target: CompiledTarget::Enter(child),
                         exit: None,
                         exits_itself: false,
-                        hint: menu.hint.clone().unwrap_or_else(|| title.clone()),
-                        description: format!("+{title}"),
+                        hint: menu.hint.clone().unwrap_or(title),
+                        description: self.enter_description(child),
                         hidden: menu.hidden.unwrap_or(false),
                         priority: menu.priority.unwrap_or(0),
                         owner: node.owner.clone(),

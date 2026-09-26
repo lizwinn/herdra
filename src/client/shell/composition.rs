@@ -674,6 +674,7 @@ impl ClientShellState {
                     &self.endpoints,
                     &self.active_endpoint_id,
                     &self.config.keymap,
+                    self.overlay_view_menu(),
                     &self.config.palette,
                 )?;
                 occlusion.cover(rendered.area);

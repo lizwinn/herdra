@@ -62,6 +62,9 @@ pub(crate) enum KeybindAction {
     WhatsNew,
     WorkspaceList(WorkspaceListCommand),
     Copy(CopyCommand),
+    NavigatorView(NavigatorCommand),
+    HelpView(HelpCommand),
+    SettingsView(SettingsCommand),
 }
 
 /// Commands for the workspace list view.
@@ -70,6 +73,52 @@ pub(crate) enum WorkspaceListCommand {
     Up,
     Down,
     Open,
+}
+
+/// Commands for the navigator view (the goto picker).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NavigatorCommand {
+    Search,
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    SectionPrevious,
+    SectionNext,
+    Top,
+    Bottom,
+    FilterBlocked,
+    FilterWorking,
+    FilterIdle,
+    FilterDone,
+    FilterAll,
+    FilterClear,
+    Open,
+    Close,
+}
+
+/// Commands for the keybind help view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HelpCommand {
+    Filter,
+    ScrollUp,
+    ScrollDown,
+    PageUp,
+    PageDown,
+    Top,
+    Bottom,
+    Close,
+}
+
+/// Commands for the settings view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsCommand {
+    SectionNext,
+    SectionPrevious,
+    ChoiceUp,
+    ChoiceDown,
+    Apply,
+    Close,
 }
 
 /// Commands for the copy view.

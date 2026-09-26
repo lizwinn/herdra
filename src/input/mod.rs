@@ -14,7 +14,10 @@ pub use encode::{
 pub(crate) use keybind_help::{
     filter_keybind_help_groups, keybind_help_groups, keybind_help_text_char,
 };
-pub(crate) use keybindings::{CopyCommand, KeybindAction, KeybindMatch, WorkspaceListCommand};
+pub(crate) use keybindings::{
+    CopyCommand, HelpCommand, KeybindAction, KeybindMatch, NavigatorCommand, SettingsCommand,
+    WorkspaceListCommand,
+};
 pub(crate) use lease::{InputLeaseKey, InputLeaseTable, RepeatPlan};
 #[cfg(not(windows))]
 pub use model::ime_compatible_keyboard_enhancement_flags;

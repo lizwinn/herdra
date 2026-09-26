@@ -205,6 +205,203 @@ impl ClientShellState {
             .find(|row| row.current)
             .map(|row| row.target.clone());
         self.overlay = Some(ClientShellOverlay::Navigator(navigator));
+        self.open_view_menu(crate::input::keymap::ViewKind::Navigator);
+    }
+
+    pub(super) fn open_help_overlay(&mut self) {
+        self.overlay = Some(ClientShellOverlay::Help(ClientHelpOverlay {
+            query: TextEditor::default(),
+            search_focused: false,
+            scroll: 0,
+        }));
+        self.open_view_menu(crate::input::keymap::ViewKind::Help);
+    }
+
+    /// Run a navigator menu key. Does nothing unless the navigator is open.
+    pub(super) fn run_navigator_command(
+        &mut self,
+        command: crate::input::NavigatorCommand,
+        outcome: &mut ClientShellInput,
+    ) {
+        use crate::input::NavigatorCommand as N;
+
+        if !matches!(self.overlay, Some(ClientShellOverlay::Navigator(_))) {
+            return;
+        }
+        // Show agents in one state, or everything, from a clean search.
+        let show = |filter| {
+            move |navigator: &mut ClientNavigatorOverlay| {
+                navigator.query.clear();
+                navigator.filter = filter;
+                navigator.selected = None;
+            }
+        };
+        match command {
+            N::Up => self.move_navigator_selection(-1),
+            N::Down => self.move_navigator_selection(1),
+            N::PageUp => self.move_navigator_selection(-8),
+            N::PageDown => self.move_navigator_selection(8),
+            N::SectionPrevious => self.move_navigator_workspace(false),
+            N::SectionNext => self.move_navigator_workspace(true),
+            N::Top => self.edit_navigator(|navigator| {
+                navigator.selected = None;
+                navigator.scroll = 0;
+            }),
+            N::Bottom => {
+                let last = self.overlay.as_ref().and_then(|overlay| match overlay {
+                    ClientShellOverlay::Navigator(navigator) => render::client_navigator_rows(
+                        &self.endpoints,
+                        &self.active_endpoint_id,
+                        navigator,
+                    )
+                    .last()
+                    .map(|row| row.target.clone()),
+                    _ => None,
+                });
+                self.edit_navigator(|navigator| navigator.selected = last);
+            }
+            N::Search => self.edit_navigator(|navigator| {
+                navigator.search_focused = true;
+                navigator.filter = None;
+            }),
+            N::FilterBlocked => self.edit_navigator(show(Some(ClientNavigatorFilter::Blocked))),
+            N::FilterWorking => self.edit_navigator(show(Some(ClientNavigatorFilter::Working))),
+            N::FilterIdle => self.edit_navigator(show(Some(ClientNavigatorFilter::Idle))),
+            N::FilterDone => self.edit_navigator(show(Some(ClientNavigatorFilter::Done))),
+            N::FilterAll => self.edit_navigator(show(None)),
+            N::FilterClear => self.edit_navigator(|navigator| {
+                if navigator.filter.take().is_some() {
+                    navigator.selected = None;
+                }
+            }),
+            N::Open => {
+                self.accept_navigator_selection(outcome);
+                return;
+            }
+            N::Close => self.overlay = None,
+        }
+        outcome.repaint = true;
+    }
+
+    fn edit_navigator(&mut self, edit: impl FnOnce(&mut ClientNavigatorOverlay)) {
+        if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+            edit(navigator);
+        }
+    }
+
+    /// Run a keybind list menu key. Does nothing unless the list is open.
+    pub(super) fn run_help_command(
+        &mut self,
+        command: crate::input::HelpCommand,
+        outcome: &mut ClientShellInput,
+    ) {
+        use crate::input::HelpCommand as H;
+
+        let max_scroll = self.hits.help_max_scroll;
+        let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() else {
+            return;
+        };
+        let scroll_by = |help: &mut ClientHelpOverlay, delta: isize| {
+            help.scroll = help.scroll.saturating_add_signed(delta).min(max_scroll);
+        };
+        match command {
+            H::Filter => {
+                help.search_focused = true;
+                help.scroll = 0;
+            }
+            H::ScrollUp => scroll_by(help, -1),
+            H::ScrollDown => scroll_by(help, 1),
+            H::PageUp => scroll_by(help, -8),
+            H::PageDown => scroll_by(help, 8),
+            H::Top => help.scroll = 0,
+            H::Bottom => help.scroll = max_scroll,
+            H::Close => self.overlay = None,
+        }
+        outcome.repaint = true;
+    }
+
+    /// Keys typed while the navigator search or the keybind filter has
+    /// focus edit the field; they never reach the keymap. Enter and esc end
+    /// the capture as they always have. Returns false when no field has
+    /// focus.
+    pub(super) fn route_popup_text_key(
+        &mut self,
+        key: &crate::input::TerminalKey,
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        use crossterm::event::KeyModifiers;
+
+        let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
+        match self.overlay.as_mut() {
+            Some(ClientShellOverlay::Navigator(navigator)) if navigator.search_focused => {
+                if code == KeyCode::Esc {
+                    navigator.search_focused = false;
+                    outcome.repaint = true;
+                    return true;
+                }
+                if code == KeyCode::Enter {
+                    self.accept_navigator_selection(outcome);
+                    return true;
+                }
+                if let Some(content_changed) = navigator.query.handle_key(key) {
+                    if content_changed {
+                        navigator.filter = None;
+                        navigator.selected = None;
+                    }
+                    outcome.repaint = true;
+                    return true;
+                }
+                if code == KeyCode::Up
+                    || code == KeyCode::Char('p') && modifiers == KeyModifiers::CONTROL
+                {
+                    self.move_navigator_selection(-1);
+                    outcome.repaint = true;
+                } else if code == KeyCode::Down
+                    || code == KeyCode::Char('n') && modifiers == KeyModifiers::CONTROL
+                {
+                    self.move_navigator_selection(1);
+                    outcome.repaint = true;
+                }
+                true
+            }
+            Some(ClientShellOverlay::Help(help)) if help.search_focused => {
+                if let Some(content_changed) = help.query.handle_key(key) {
+                    if content_changed {
+                        help.scroll = 0;
+                    }
+                    outcome.repaint = true;
+                    return true;
+                }
+                let delta = match code {
+                    KeyCode::Up => Some(-1),
+                    KeyCode::Down => Some(1),
+                    KeyCode::PageUp => Some(-8),
+                    KeyCode::PageDown => Some(8),
+                    KeyCode::Char('p') if modifiers == KeyModifiers::CONTROL => Some(-1),
+                    KeyCode::Char('n') if modifiers == KeyModifiers::CONTROL => Some(1),
+                    _ => None,
+                };
+                match code {
+                    KeyCode::Esc => {
+                        help.search_focused = false;
+                        help.query.clear();
+                        help.scroll = 0;
+                    }
+                    KeyCode::Enter => self.overlay = None,
+                    _ => {
+                        if let Some(delta) = delta {
+                            help.scroll = help
+                                .scroll
+                                .saturating_add_signed(delta)
+                                .min(self.hits.help_max_scroll);
+                        }
+                    }
+                }
+                outcome.repaint = true;
+                true
+            }
+            _ => false,
+        }
     }
 
     pub(super) fn move_navigator_selection(&mut self, delta: isize) {
@@ -595,10 +792,6 @@ impl ClientShellState {
             return;
         }
 
-        if self.route_settings_key(key, outcome) {
-            return;
-        }
-
         if matches!(self.overlay, Some(ClientShellOverlay::ContextMenu(_))) {
             match key.code {
                 KeyCode::Esc => {
@@ -628,253 +821,6 @@ impl ClientShellState {
         if self.route_worktree_overlay_key(key, outcome) {
             return;
         }
-        if matches!(self.overlay, Some(ClientShellOverlay::Navigator(_))) {
-            let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
-            let search_focused = matches!(
-                self.overlay,
-                Some(ClientShellOverlay::Navigator(ClientNavigatorOverlay {
-                    search_focused: true,
-                    ..
-                }))
-            );
-            if code == KeyCode::Esc {
-                if search_focused {
-                    if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                        navigator.search_focused = false;
-                    }
-                } else {
-                    self.overlay = None;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Enter {
-                self.accept_navigator_selection(outcome);
-                return;
-            }
-            if search_focused {
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    if let Some(content_changed) = navigator.query.handle_key(key) {
-                        if content_changed {
-                            navigator.filter = None;
-                            navigator.selected = None;
-                        }
-                        outcome.repaint = true;
-                        return;
-                    }
-                }
-                if code == KeyCode::Up
-                    || code == KeyCode::Char('p') && modifiers == KeyModifiers::CONTROL
-                {
-                    self.move_navigator_selection(-1);
-                    outcome.repaint = true;
-                    return;
-                }
-                if code == KeyCode::Down
-                    || code == KeyCode::Char('n') && modifiers == KeyModifiers::CONTROL
-                {
-                    self.move_navigator_selection(1);
-                    outcome.repaint = true;
-                    return;
-                }
-                return;
-            }
-            if matches!(code, KeyCode::Left | KeyCode::Right) && modifiers.is_empty() {
-                self.move_navigator_workspace(code == KeyCode::Right);
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Backspace && modifiers.is_empty() {
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    if navigator.filter.take().is_some() {
-                        navigator.selected = None;
-                    }
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Home && modifiers.is_empty() {
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    navigator.selected = None;
-                    navigator.scroll = 0;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if matches!(code, KeyCode::End | KeyCode::Char('G')) && modifiers.is_empty() {
-                let last = self.overlay.as_ref().and_then(|overlay| match overlay {
-                    ClientShellOverlay::Navigator(navigator) => render::client_navigator_rows(
-                        &self.endpoints,
-                        &self.active_endpoint_id,
-                        navigator,
-                    )
-                    .last()
-                    .map(|row| row.target.clone()),
-                    _ => None,
-                });
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    navigator.selected = last;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('/') && modifiers.is_empty() {
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    navigator.search_focused = true;
-                    navigator.filter = None;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if matches!(code, KeyCode::Down | KeyCode::Char('j')) && modifiers.is_empty() {
-                self.move_navigator_selection(1);
-                outcome.repaint = true;
-                return;
-            }
-            if matches!(code, KeyCode::Up | KeyCode::Char('k')) && modifiers.is_empty() {
-                self.move_navigator_selection(-1);
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('d') && modifiers.contains(KeyModifiers::CONTROL) {
-                self.move_navigator_selection(8);
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('u') && modifiers.contains(KeyModifiers::CONTROL) {
-                self.move_navigator_selection(-8);
-                outcome.repaint = true;
-                return;
-            }
-            if let Some(filter) = match code {
-                KeyCode::Char('b') if modifiers.is_empty() => Some(ClientNavigatorFilter::Blocked),
-                KeyCode::Char('w') if modifiers.is_empty() => Some(ClientNavigatorFilter::Working),
-                KeyCode::Char('i') if modifiers.is_empty() => Some(ClientNavigatorFilter::Idle),
-                KeyCode::Char('d') if modifiers.is_empty() => Some(ClientNavigatorFilter::Done),
-                _ => None,
-            } {
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    navigator.query.clear();
-                    navigator.filter = Some(filter);
-                    navigator.selected = None;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('a') && modifiers.is_empty() {
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    navigator.query.clear();
-                    navigator.filter = None;
-                    navigator.selected = None;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            return;
-        }
-
-        if matches!(self.overlay, Some(ClientShellOverlay::Help(_))) {
-            let text_character = crate::input::keybind_help_text_char(key);
-            let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
-            let search_focused = matches!(
-                self.overlay,
-                Some(ClientShellOverlay::Help(ClientHelpOverlay {
-                    search_focused: true,
-                    ..
-                }))
-            );
-            if search_focused {
-                if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
-                    if let Some(content_changed) = help.query.handle_key(key) {
-                        if content_changed {
-                            help.scroll = 0;
-                        }
-                        outcome.repaint = true;
-                        return;
-                    }
-                }
-                match code {
-                    KeyCode::Esc => {
-                        if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
-                            help.search_focused = false;
-                            help.query.clear();
-                            help.scroll = 0;
-                        }
-                    }
-                    KeyCode::Enter => self.overlay = None,
-                    KeyCode::Up
-                    | KeyCode::Down
-                    | KeyCode::PageUp
-                    | KeyCode::PageDown
-                    | KeyCode::Char('n' | 'p')
-                        if !matches!(code, KeyCode::Char(_))
-                            || modifiers == KeyModifiers::CONTROL =>
-                    {
-                        let delta = match code {
-                            KeyCode::Up | KeyCode::Char('p') => -1,
-                            KeyCode::Down | KeyCode::Char('n') => 1,
-                            KeyCode::PageUp => -8,
-                            KeyCode::PageDown => 8,
-                            _ => unreachable!(),
-                        };
-                        if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
-                            help.scroll = help
-                                .scroll
-                                .saturating_add_signed(delta)
-                                .min(self.hits.help_max_scroll);
-                        }
-                    }
-                    _ => {}
-                }
-                outcome.repaint = true;
-                return;
-            }
-
-            match code {
-                KeyCode::Esc | KeyCode::Enter => self.overlay = None,
-                KeyCode::Home => {
-                    if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
-                        help.scroll = 0;
-                    }
-                }
-                KeyCode::End => {
-                    if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
-                        help.scroll = self.hits.help_max_scroll;
-                    }
-                }
-                KeyCode::Up
-                | KeyCode::Char('k')
-                | KeyCode::Down
-                | KeyCode::Char('j')
-                | KeyCode::PageUp
-                | KeyCode::PageDown => {
-                    let delta = match code {
-                        KeyCode::Up | KeyCode::Char('k') => -1,
-                        KeyCode::Down | KeyCode::Char('j') => 1,
-                        KeyCode::PageUp => -8,
-                        KeyCode::PageDown => 8,
-                        _ => unreachable!(),
-                    };
-                    if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
-                        help.scroll = help
-                            .scroll
-                            .saturating_add_signed(delta)
-                            .min(self.hits.help_max_scroll);
-                    }
-                }
-                _ if text_character == Some('/') => {
-                    if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
-                        help.search_focused = true;
-                        help.scroll = 0;
-                    }
-                }
-                _ if text_character == Some('?') => self.overlay = None,
-                _ => {}
-            }
-            outcome.repaint = true;
-            return;
-        }
-
         if matches!(self.overlay, Some(ClientShellOverlay::ConfirmClose(_))) {
             if key.code == KeyCode::Enter {
                 self.accept_close_confirmation(outcome);

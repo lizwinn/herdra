@@ -853,3 +853,167 @@ fn compile_problems_are_credited_to_the_layer_that_caused_them() {
         ["keymap example.layout/keymap.kdl: ctrl+b u opens unknown menu id \"nowhere\""]
     );
 }
+
+#[test]
+fn popup_views_are_sticky_menus_that_hide_the_bar() {
+    let keymap = CompiledKeymap::default();
+    for (keys, title, view) in [
+        (vec![ctrl('b'), ch('g')], "navigator", ViewKind::Navigator),
+        (vec![ctrl('b'), ch('?')], "keybinds", ViewKind::Help),
+        (
+            vec![ctrl('b'), ch('s'), ch('s')],
+            "settings",
+            ViewKind::Settings,
+        ),
+    ] {
+        let (stack, ran) = press(&keymap, &keys);
+        let stack = stack.expect("popup menu open");
+        let menu = keymap.menu(stack.top());
+        assert_eq!(menu.title, title);
+        assert_eq!(menu.view, Some(view));
+        assert!(menu.sticky, "{title} keeps its keys open");
+        assert_eq!(menu.bar, Some(BarVisibility::Hidden), "{title}");
+        assert!(ran.is_empty());
+    }
+
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('g'), ch('j'), ch('d'), ch('x')]);
+    assert_eq!(titles(&keymap, stack), ["herdra", "navigator"]);
+    assert_eq!(
+        ran,
+        ["navigator.move.down", "navigator.filter.done", "ignore"]
+    );
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('g'), key(KeyCode::Enter)]);
+    assert_eq!(
+        titles(&keymap, stack),
+        ["herdra", "navigator"],
+        "open closes the navigator itself when it succeeds"
+    );
+    assert_eq!(ran, ["navigator.open"]);
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('?'), ch('j'), ch('?')]);
+    assert_eq!(titles(&keymap, stack), ["herdra", "keybinds"]);
+    assert_eq!(ran, ["help.scroll.down", "help.close"]);
+
+    let classic = build("base classic");
+    let (stack, ran) = press(&classic, &[ctrl('b'), ch('s'), key(KeyCode::Tab)]);
+    assert_eq!(titles(&classic, stack), ["prefix", "settings"]);
+    assert_eq!(ran, ["settings.section.next"]);
+    let (stack, _) = press(&classic, &[ctrl('b'), ch('g'), ctrl('b')]);
+    assert_eq!(
+        titles(&classic, stack),
+        ["prefix"],
+        "the prefix reopens the main menu from a popup"
+    );
+}
+
+#[test]
+fn question_mark_lists_keys_from_any_menu_that_does_not_bind_it() {
+    let keymap = CompiledKeymap::default();
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('t'), ch('?')]);
+    assert_eq!(
+        titles(&keymap, stack),
+        ["herdra", "tab"],
+        "the menus stay open under the list"
+    );
+    assert_eq!(ran, ["app.help"]);
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('p'), ch('r'), ch('?')]);
+    assert_eq!(titles(&keymap, stack), ["herdra", "pane", "resize"]);
+    assert_eq!(ran, ["app.help"]);
+    let (_, ran) = press(&keymap, &[ctrl('b'), ch('p'), ch('y'), ch('?')]);
+    assert_eq!(ran, ["copy.search.backward"], "a menu's own ? wins");
+    let (stack, ran) = press(&keymap, &[ch('?')]);
+    assert_eq!(stack, None);
+    assert_eq!(ran, ["forward"], "? types into the pane at the top level");
+}
+
+#[test]
+fn popup_keys_follow_the_users_keymap() {
+    let keymap = build(
+        r#"
+        prefix {
+            g {
+                x navigator.move.down
+                j none
+            }
+            "?" {
+                q help.close
+            }
+        }
+        "#,
+    );
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('g'), ch('x'), ch('j'), ch('k')]);
+    assert_eq!(titles(&keymap, stack), ["herdra", "navigator"]);
+    assert_eq!(ran, ["navigator.move.down", "ignore", "navigator.move.up"]);
+    let (_, ran) = press(&keymap, &[ctrl('b'), ch('?'), ch('q')]);
+    assert_eq!(ran, ["help.close"]);
+
+    let navigator = keymap.menu(
+        keymap
+            .menu_with_view(ViewKind::Navigator)
+            .expect("navigator"),
+    );
+    let segments = navigator
+        .bar_plan
+        .segments
+        .iter()
+        .map(|segment| format!("{} {}", segment.keys, segment.label))
+        .collect::<Vec<_>>();
+    assert!(segments.contains(&"↑/↓/k rows".to_owned()), "{segments:?}");
+    assert!(segments.contains(&"x down".to_owned()), "{segments:?}");
+
+    let keymap = build("prefix { \"?\" pane.zoom; g app.navigator }");
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    assert_eq!(press(&keymap, &[ctrl('b'), ch('g')]).1, ["app.navigator"]);
+    let navigator = keymap.menu(
+        keymap
+            .menu_with_view(ViewKind::Navigator)
+            .expect("navigator"),
+    );
+    assert!(
+        navigator.bindings.iter().any(|binding| {
+            binding.chord == Chord::parse("j").expect("chord")
+                && binding_action_id(binding) == Some("navigator.move.down")
+        }),
+        "a rebound popup key leaves its named menu for app.navigator"
+    );
+    let help = keymap.menu(keymap.menu_with_view(ViewKind::Help).expect("help"));
+    assert!(help.bindings.len() > 1);
+}
+
+#[test]
+fn popup_menus_read_as_their_actions_in_help_and_bars() {
+    let keymap = CompiledKeymap::default();
+    let herdra = keymap
+        .help
+        .iter()
+        .find(|group| group.title == "herdra")
+        .expect("main menu group");
+    assert!(herdra
+        .entries
+        .contains(&("ctrl+b g".to_owned(), "session navigator".to_owned())));
+    assert!(herdra
+        .entries
+        .contains(&("ctrl+b ?".to_owned(), "keybinds".to_owned())));
+    let navigator = keymap
+        .menu_with_view(ViewKind::Navigator)
+        .expect("navigator");
+    assert!(keymap
+        .help
+        .iter()
+        .any(|group| group.title == "herdra › navigator" && group.menu == navigator));
+
+    let session = keymap.menu(keymap.menu_by_path("ctrl+b s").expect("session"));
+    let first = &session.bar_plan.segments[1];
+    assert_eq!(
+        (first.keys.as_str(), first.label.as_str()),
+        ("s", "settings")
+    );
+
+    let fallback = build("base none");
+    for view in [ViewKind::Navigator, ViewKind::Help, ViewKind::Settings] {
+        let menu = fallback.menu(fallback.menu_with_view(view).expect("fallback menu"));
+        assert!(menu.bindings.is_empty());
+        assert!(menu.sticky);
+        assert_eq!(menu.bar, Some(BarVisibility::Hidden));
+    }
+}

@@ -79,7 +79,8 @@ fn push_host_theme_update(
 
 impl ClientShellState {
     pub(crate) fn host_keyboard_report_all_requested(&self) -> bool {
-        matches!(self.mode, ClientShellMode::Menu(_))
+        // Popups type into their search fields the way they always have.
+        matches!(self.mode, ClientShellMode::Menu(_)) && self.overlay_view().is_none()
     }
 
     #[cfg(test)]
@@ -501,6 +502,7 @@ impl ClientShellState {
         key: &crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) -> Option<ClientInputTarget> {
+        self.reconcile_overlay_views();
         if self.handle_modal_paste_shortcut_with(key, outcome, crate::platform::read_clipboard_text)
         {
             return None;
@@ -523,6 +525,15 @@ impl ClientShellState {
         }
         if self.popup_pending {
             return None;
+        }
+        if self.overlay_view().is_some() {
+            // The navigator, keybind list, and settings popups take keys
+            // from their menus, except while a search field has focus.
+            if matches!(key.code, KeyCode::Modifier(_)) || self.route_popup_text_key(key, outcome) {
+                self.reconcile_overlay_views();
+                return None;
+            }
+            return self.route_keymap_key(key, outcome);
         }
         if self.overlay.is_some() {
             self.route_overlay_key(key, outcome);

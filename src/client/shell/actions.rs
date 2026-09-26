@@ -6,6 +6,11 @@ impl ClientShellState {
         binding: crate::input::KeybindMatch,
         outcome: &mut ClientShellInput,
     ) {
+        if let crate::input::KeybindMatch::Action(action) = &binding {
+            if !self.leave_settings_for(*action) {
+                return;
+            }
+        }
         match binding {
             crate::input::KeybindMatch::Action(crate::input::KeybindAction::Detach) => {
                 outcome.detach = true;
@@ -49,11 +54,7 @@ impl ClientShellState {
                     return;
                 }
                 if action == crate::input::KeybindAction::Help {
-                    self.overlay = Some(ClientShellOverlay::Help(ClientHelpOverlay {
-                        query: TextEditor::default(),
-                        search_focused: false,
-                        scroll: 0,
-                    }));
+                    self.open_help_overlay();
                     outcome.repaint = true;
                     return;
                 }
@@ -163,6 +164,18 @@ impl ClientShellState {
                 }
                 if let crate::input::KeybindAction::Copy(command) = action {
                     self.run_copy_command(command, outcome);
+                    return;
+                }
+                if let crate::input::KeybindAction::NavigatorView(command) = action {
+                    self.run_navigator_command(command, outcome);
+                    return;
+                }
+                if let crate::input::KeybindAction::HelpView(command) = action {
+                    self.run_help_command(command, outcome);
+                    return;
+                }
+                if let crate::input::KeybindAction::SettingsView(command) = action {
+                    self.run_settings_command(command, outcome);
                     return;
                 }
                 if action == crate::input::KeybindAction::WhatsNew {

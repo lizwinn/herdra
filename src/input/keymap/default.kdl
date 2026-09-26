@@ -8,12 +8,52 @@
 //
 // Menus close after a leaf runs. Leaves marked `stay` keep the menu open, and
 // `sticky` menus keep every leaf open until you press esc. esc cancels,
-// backspace goes back one menu.
+// backspace goes back one menu, and ? lists the keys of the open menu.
+//
+// Menus with a view= show something while they are open: the workspace
+// list, copy mode, or the navigator, keybinds, and settings popups.
 
 prefix herdra id=herdra {
     prefix menu.literal
-    "?" app.help
-    g app.navigator
+
+    "?" keybinds view=help id=help {
+        "/" help.filter
+        j help.scroll.down scroll
+        k help.scroll.up scroll
+        up help.scroll.up scroll
+        down help.scroll.down scroll
+        pageup help.page.up scroll
+        pagedown help.page.down scroll
+        home help.top hidden
+        end help.bottom hidden
+        enter help.close
+        "?" help.close hidden
+        esc help.close
+    }
+
+    g navigator view=navigator id=navigator {
+        up navigator.move.up rows
+        down navigator.move.down rows
+        j navigator.move.down rows
+        k navigator.move.up rows
+        ctrl+u navigator.page.up hidden
+        ctrl+d navigator.page.down hidden
+        home navigator.top hidden
+        end navigator.bottom hidden
+        G navigator.bottom hidden
+        left navigator.section.previous workspace
+        right navigator.section.next workspace
+        "/" navigator.search
+        a navigator.filter.all filter
+        b navigator.filter.blocked filter
+        w navigator.filter.working filter
+        i navigator.filter.idle filter
+        d navigator.filter.done filter
+        backspace navigator.filter.clear hidden
+        enter navigator.open
+        esc navigator.close
+    }
+
     b app.sidebar
 
     w workspace view=workspace-list unmatched=ignore {
@@ -130,7 +170,22 @@ prefix herdra id=herdra {
     }
 
     s session {
-        s app.settings
+        s settings view=settings id=settings {
+            up settings.choice.up select
+            down settings.choice.down select
+            k settings.choice.up hidden
+            j settings.choice.down hidden
+            tab settings.section.next section
+            right settings.section.next hidden
+            l settings.section.next hidden
+            shift+tab settings.section.previous hidden
+            left settings.section.previous hidden
+            shift+left settings.section.previous hidden
+            h settings.section.previous hidden
+            enter settings.apply hidden
+            space settings.apply hidden
+            esc settings.close hidden
+        }
         r app.reload
         d app.detach
         w app.whats-new

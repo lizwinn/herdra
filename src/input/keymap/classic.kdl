@@ -7,12 +7,66 @@
 prefix prefix id=prefix {
     esc menu.cancel
     prefix menu.literal
-    "?" app.help
-    s app.settings hidden
+
+    "?" keybinds view=help id=help {
+        "/" help.filter
+        j help.scroll.down scroll
+        k help.scroll.up scroll
+        up help.scroll.up scroll
+        down help.scroll.down scroll
+        pageup help.page.up scroll
+        pagedown help.page.down scroll
+        home help.top hidden
+        end help.bottom hidden
+        enter help.close
+        "?" help.close hidden
+        esc help.close
+    }
+
+    s settings hidden view=settings id=settings {
+        up settings.choice.up select
+        down settings.choice.down select
+        k settings.choice.up hidden
+        j settings.choice.down hidden
+        tab settings.section.next section
+        right settings.section.next hidden
+        l settings.section.next hidden
+        shift+tab settings.section.previous hidden
+        left settings.section.previous hidden
+        shift+left settings.section.previous hidden
+        h settings.section.previous hidden
+        enter settings.apply hidden
+        space settings.apply hidden
+        esc settings.close hidden
+    }
+
     q app.detach hidden
     R app.reload hidden
     o agent.notification hidden
-    g app.navigator hidden
+
+    g navigator hidden view=navigator id=navigator {
+        up navigator.move.up rows
+        down navigator.move.down rows
+        j navigator.move.down rows
+        k navigator.move.up rows
+        ctrl+u navigator.page.up hidden
+        ctrl+d navigator.page.down hidden
+        home navigator.top hidden
+        end navigator.bottom hidden
+        G navigator.bottom hidden
+        left navigator.section.previous workspace
+        right navigator.section.next workspace
+        "/" navigator.search
+        a navigator.filter.all filter
+        b navigator.filter.blocked filter
+        w navigator.filter.working filter
+        i navigator.filter.idle filter
+        d navigator.filter.done filter
+        backspace navigator.filter.clear hidden
+        enter navigator.open
+        esc navigator.close
+    }
+
     N workspace.new hidden
     G worktree.new hidden
     W workspace.rename hidden

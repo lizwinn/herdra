@@ -3,7 +3,7 @@ title: Keymap
 description: Every Herdra key lives in one tree of menus defined in keymap.kdl. Build, extend, or replace it.
 ---
 
-Every key Herdra handles lives in one tree. The top of the tree is where you type into a pane. The prefix, `ctrl+b` by default, is a chord at that level that opens the main menu. Every menu shows its keys in the bar at the bottom of the window, and any key in a menu either runs an action or opens another menu.
+Every key Herdra handles lives in one tree: the menus, the workspace list, copy mode, and the navigator, keybind, and settings popups. Only text fields and one-off dialogs, such as rename, confirm, and the right-click and global menus, read keys directly. The top of the tree is where you type into a pane. The prefix, `ctrl+b` by default, is a chord at that level that opens the main menu. Every menu shows its keys in the bar at the bottom of the window, and any key in a menu either runs an action or opens another menu.
 
 The tree Herdra ships is only a default. It uses the same file format, rules, and actions that you and plugins use, so you can add a key anywhere, move a whole menu, or throw the default away and build your own.
 
@@ -82,12 +82,17 @@ A built-in key inside a menu that is the same chord as your prefix gives way to 
 | `fallthrough` | Keys this menu does not bind are looked up in the menu under it, and run as if pressed there. |
 | `view=workspace-list` | Show the workspace list while the menu is open. |
 | `view=copy` | Run copy mode on the focused pane while the menu is open. Copy menus are sticky modes unless you say otherwise. |
+| `view=navigator` | Show the navigator (the goto picker) while the menu is open. |
+| `view=help` | Show the keybind list while the menu is open. It starts with any problems in your keymap files. `?` in a menu that does not bind it opens this list at that menu's keys. |
+| `view=settings` | Show settings while the menu is open. |
 | `unmatched=ignore\|cancel\|forward` | What an unbound key does: nothing, close the menu, or close it and send the key to the pane. |
 | `bar=full\|badge\|hidden` | Show every hint, only the menu title, or no bar. Menus without `bar=` follow `ui.mode_hint_bar` in `config.toml`. |
 | `id=name` | Let `menu.open name` open this menu from anywhere, even after its key is rebound or removed. |
 | `hint="..."` | Text shown in the parent menu's bar. Defaults to the title. |
 | `hidden`, `priority=N` | As for leaves. |
 | `replace` | Swap this menu's children for the ones you write instead of adding to them. The menu keeps its title, flags, and id unless you set new ones. |
+
+Navigator, help, and settings menus are sticky and hide the bottom bar unless you say otherwise; the popup lists the menu's keys itself, from the same hints the bar would show. Opening the popup any other way (a click, the global menu, or a leaf such as `app.help`) opens the first menu with its view, and closing the popup closes its menu. While the navigator search or the keybind filter has focus, keys edit the text instead: `esc` leaves the field, and `enter` opens the selected row or closes the list.
 
 ## Changing the default tree
 
@@ -233,7 +238,45 @@ These run inside a menu with `view=copy`.
 | `copy.exit` | Exit copy mode. | exit |
 | `copy.escape` | Clear selection or search, else exit. | clear |
 
-`copy.yank`, `copy.exit`, and `copy.escape` close copy mode themselves when they finish, as does `workspace.list.open` for the workspace list.
+### Navigator, keybinds, and settings
+
+These run inside a menu with `view=navigator`, `view=help`, or `view=settings`.
+
+| Action | Does | Bar label |
+| --- | --- | --- |
+| `navigator.move.up` | Move up the list. | up |
+| `navigator.move.down` | Move down the list. | down |
+| `navigator.page.up` | Move up eight rows. | page up |
+| `navigator.page.down` | Move down eight rows. | page down |
+| `navigator.section.previous` | First row of the previous workspace. | previous workspace |
+| `navigator.section.next` | First row of the next workspace. | next workspace |
+| `navigator.top` | Select the first terminal. | first |
+| `navigator.bottom` | Select the last row. | last |
+| `navigator.search` | Type in the search field. | search |
+| `navigator.filter.blocked` | Show blocked agents. | blocked |
+| `navigator.filter.working` | Show working agents. | working |
+| `navigator.filter.idle` | Show idle agents. | idle |
+| `navigator.filter.done` | Show done agents. | done |
+| `navigator.filter.all` | Clear the search and filter. | all |
+| `navigator.filter.clear` | Clear the status filter. | clear filter |
+| `navigator.open` | Open the selected row. | open |
+| `navigator.close` | Close the navigator. | close |
+| `help.filter` | Type in the filter field. | filter |
+| `help.scroll.up` | Scroll up. | up |
+| `help.scroll.down` | Scroll down. | down |
+| `help.page.up` | Scroll up eight rows. | page up |
+| `help.page.down` | Scroll down eight rows. | page down |
+| `help.top` | Scroll to the top. | top |
+| `help.bottom` | Scroll to the bottom. | bottom |
+| `help.close` | Close keybinds. | close |
+| `settings.section.next` | Next settings section. | next section |
+| `settings.section.previous` | Previous settings section. | previous section |
+| `settings.choice.up` | Previous choice. | up |
+| `settings.choice.down` | Next choice. | down |
+| `settings.apply` | Apply the selected choice or install integrations. | apply |
+| `settings.close` | Close settings and undo a theme preview. | close |
+
+`copy.yank`, `copy.exit`, and `copy.escape` close copy mode themselves when they finish, as does `workspace.list.open` for the workspace list. `navigator.open`, `navigator.close`, `help.close`, `settings.apply` (for a theme), and `settings.close` close their popups the same way. `settings.close` waits while integrations install.
 
 ## The default tree
 
@@ -250,12 +293,52 @@ These run inside a menu with `view=copy`.
 //
 // Menus close after a leaf runs. Leaves marked `stay` keep the menu open, and
 // `sticky` menus keep every leaf open until you press esc. esc cancels,
-// backspace goes back one menu.
+// backspace goes back one menu, and ? lists the keys of the open menu.
+//
+// Menus with a view= show something while they are open: the workspace
+// list, copy mode, or the navigator, keybinds, and settings popups.
 
 prefix herdra id=herdra {
     prefix menu.literal
-    "?" app.help
-    g app.navigator
+
+    "?" keybinds view=help id=help {
+        "/" help.filter
+        j help.scroll.down scroll
+        k help.scroll.up scroll
+        up help.scroll.up scroll
+        down help.scroll.down scroll
+        pageup help.page.up scroll
+        pagedown help.page.down scroll
+        home help.top hidden
+        end help.bottom hidden
+        enter help.close
+        "?" help.close hidden
+        esc help.close
+    }
+
+    g navigator view=navigator id=navigator {
+        up navigator.move.up rows
+        down navigator.move.down rows
+        j navigator.move.down rows
+        k navigator.move.up rows
+        ctrl+u navigator.page.up hidden
+        ctrl+d navigator.page.down hidden
+        home navigator.top hidden
+        end navigator.bottom hidden
+        G navigator.bottom hidden
+        left navigator.section.previous workspace
+        right navigator.section.next workspace
+        "/" navigator.search
+        a navigator.filter.all filter
+        b navigator.filter.blocked filter
+        w navigator.filter.working filter
+        i navigator.filter.idle filter
+        d navigator.filter.done filter
+        backspace navigator.filter.clear hidden
+        enter navigator.open
+        esc navigator.close
+    }
+
     b app.sidebar
 
     w workspace view=workspace-list unmatched=ignore {
@@ -372,7 +455,22 @@ prefix herdra id=herdra {
     }
 
     s session {
-        s app.settings
+        s settings view=settings id=settings {
+            up settings.choice.up select
+            down settings.choice.down select
+            k settings.choice.up hidden
+            j settings.choice.down hidden
+            tab settings.section.next section
+            right settings.section.next hidden
+            l settings.section.next hidden
+            shift+tab settings.section.previous hidden
+            left settings.section.previous hidden
+            shift+left settings.section.previous hidden
+            h settings.section.previous hidden
+            enter settings.apply hidden
+            space settings.apply hidden
+            esc settings.close hidden
+        }
         r app.reload
         d app.detach
         w app.whats-new

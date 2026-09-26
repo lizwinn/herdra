@@ -17,6 +17,9 @@ impl ClientShellState {
     }
 
     pub(crate) fn reconcile_input_source(&mut self) {
+        // Settle popup menus first: whether a menu is open decides the
+        // input source.
+        self.reconcile_overlay_views();
         // Keep the platform restore token while another window has focus. Restoring
         // through a global key injection is only safe after this client regains focus.
         if self.outer_focused == Some(false) {

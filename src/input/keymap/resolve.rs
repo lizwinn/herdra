@@ -3,8 +3,8 @@
 //! The top level is where keys go to the pane. A top-level chord opens a
 //! menu. Inside menus, the top menu's bindings apply first, then the menus
 //! under it while each one says `fallthrough`, then top-level chords (so the
-//! prefix and prefix-free chords work everywhere), then the common `esc` and
-//! `backspace` bindings.
+//! prefix and prefix-free chords work everywhere), then the common `esc`,
+//! `backspace`, and `?` bindings.
 //!
 //! Opening a submenu stacks it on the menu it was opened from, so
 //! `backspace` goes back one menu. When a leaf closes its menu, the one-shot
