@@ -246,7 +246,9 @@ pub(super) fn snapshot_with_completions(
         product_announcement,
         update_available: app.state.update_available.clone(),
         update_install_command: app.state.update_install_command.clone(),
-        server_keybindings_toml: app.client_shell_keybindings_profile().map(str::to_owned),
+        // Keys are resolved by the client from keymap.kdl; the legacy TOML
+        // keybinding profile is no longer published.
+        server_keybindings_toml: None,
         latest_release_notes_available: app.state.latest_release_notes_available,
         integration_updates_available: app.state.integration_updates_available(),
         worktree_directory: app.state.worktree_directory.to_string_lossy().into_owned(),

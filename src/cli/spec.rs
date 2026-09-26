@@ -33,6 +33,7 @@ pub(super) fn command() -> Command {
         .subcommand(update_command())
         .subcommand(status_command())
         .subcommand(config_command())
+        .subcommand(keymap_command())
         .subcommand(channel_command())
         .subcommand(machine::command())
         .subcommand(server_command())
@@ -138,8 +139,47 @@ fn status_command() -> Command {
 fn config_command() -> Command {
     Command::new("config")
         .about("Manage local configuration")
-        .subcommand(Command::new("check").about("Validate config.toml and print diagnostics"))
-        .subcommand(Command::new("reset-keys").about("Reset custom keybindings"))
+        .subcommand(
+            Command::new("check")
+                .about("Validate config.toml and keymap.kdl and print diagnostics"),
+        )
+}
+
+fn keymap_command() -> Command {
+    Command::new("keymap")
+        .about("Inspect and manage the keymap tree in keymap.kdl")
+        .subcommand(
+            Command::new("print")
+                .about("Show the effective keymap tree")
+                .arg(json_flag()),
+        )
+        .subcommand(
+            Command::new("default")
+                .about("Print a built-in keymap")
+                .arg(
+                    Arg::new("base")
+                        .value_name("BASE")
+                        .value_parser(["herdra", "classic"])
+                        .help("Built-in keymap to print (default: herdra)"),
+                ),
+        )
+        .subcommand(
+            Command::new("check")
+                .about("Validate keymap.kdl and print diagnostics")
+                .arg(
+                    Arg::new("file")
+                        .value_name("FILE")
+                        .value_hint(ValueHint::FilePath)
+                        .help("Keymap file to check instead of the configured one"),
+                ),
+        )
+        .subcommand(Command::new("path").about("Print where keymap.kdl is read from"))
+        .subcommand(
+            Command::new("migrate")
+                .about("Convert [keys] in config.toml into keymap.kdl")
+                .arg(flag("dry-run").help("Print the converted keymap without writing files")),
+        )
+        .subcommand(Command::new("reset").about("Back up and remove keymap.kdl"))
 }
 
 fn channel_command() -> Command {

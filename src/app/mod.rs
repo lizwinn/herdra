@@ -156,7 +156,17 @@ pub struct App {
     pub(crate) full_redraw_pending: bool,
     pub(crate) overlay_panes: HashMap<crate::layout::PaneId, OverlayPaneState>,
     pub(crate) config_reloaded_from_disk: bool,
-    client_shell_keybindings_profile: Option<String>,
+    /// The user's keymap file as last loaded, for rebuilding the keymap.
+    user_keymap_file: Option<crate::input::keymap::KeymapText>,
+    /// Keymap trees from enabled plugins, by plugin id.
+    pub(crate) plugin_keymaps: Vec<(String, crate::input::keymap::KeymapText)>,
+    /// The user's keymap with command text removed, for clients that use the
+    /// server's keymap.
+    pub(crate) shared_user_keymap: Option<String>,
+    /// The server's effective keymap: base tree, plugin trees, user tree.
+    pub(crate) keymap: std::sync::Arc<crate::input::keymap::CompiledKeymap>,
+    /// Bumped whenever `keymap` changes, so clients receive the new layers.
+    pub(crate) keymap_revision: u64,
     endpoint_commands: custom_commands::EndpointCommandRegistry,
 }
 
@@ -361,7 +371,6 @@ impl App {
         api_rx: tokio::sync::mpsc::UnboundedReceiver<crate::api::ApiRequestMessage>,
         event_hub: crate::api::EventHub,
     ) -> Self {
-        let (prefix_code, prefix_mods) = config.prefix_key();
         crate::kitty_graphics::set_enabled(config.kitty_graphics_enabled());
         let (event_tx, event_rx) = mpsc::channel::<AppEvent>(APP_EVENT_CHANNEL_CAPACITY);
         let render_notify = Arc::new(Notify::new());
@@ -479,8 +488,6 @@ impl App {
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             outer_terminal_focus: None,
-            prefix_code,
-            prefix_mods,
             headless_size: config.headless_size(),
             agent_panel_sort,
             agent_view_override: None,
@@ -506,7 +513,6 @@ impl App {
             pane_scrollback_limit_bytes: config.advanced.scrollback_limit_bytes,
             sound: config.ui.sound.clone(),
             toast_config: config.ui.toast.clone(),
-            keybinds: config.keybinds(),
             palette: theme_palette,
             theme_name,
             theme_runtime,
@@ -562,9 +568,16 @@ impl App {
                 .get(idx)
                 .and_then(|ws| ws.focused_pane_id().map(|pane_id| (idx, pane_id)))
         });
-        let client_shell_keybindings_profile = config.local_keybindings_profile_toml().ok();
-        let endpoint_commands =
-            custom_commands::EndpointCommandRegistry::new(&state.keybinds.custom_commands);
+        let user_keymap_file = config.keymap_file.clone();
+        let plugin_keymaps = api::plugins::collect_plugin_keymaps(&state.installed_plugins);
+        let keymap = std::sync::Arc::new(crate::input::keymap::CompiledKeymap::build(
+            user_keymap_file.as_ref(),
+            &plugin_keymaps,
+        ));
+        let endpoint_commands = custom_commands::EndpointCommandRegistry::new(&keymap.commands);
+        let shared_user_keymap = user_keymap_file
+            .as_ref()
+            .and_then(|file| crate::input::keymap::redact_commands(&file.text));
 
         let mut app = Self {
             config_diagnostic_deadline: None,
@@ -623,7 +636,11 @@ impl App {
             full_redraw_pending: false,
             overlay_panes: HashMap::new(),
             config_reloaded_from_disk: false,
-            client_shell_keybindings_profile,
+            user_keymap_file,
+            plugin_keymaps,
+            shared_user_keymap,
+            keymap,
+            keymap_revision: 1,
             endpoint_commands,
         };
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
@@ -779,10 +796,60 @@ impl App {
                 }
             }
         };
-        self.endpoint_commands =
-            custom_commands::EndpointCommandRegistry::new(&self.state.keybinds.custom_commands);
         self.sync_toast_deadline(previous_toast);
         report
+    }
+
+    /// Recompile the server keymap from the user's file and plugin trees,
+    /// and mint command ids for its command keys.
+    pub(crate) fn rebuild_keymap(&mut self) {
+        self.keymap = std::sync::Arc::new(crate::input::keymap::CompiledKeymap::build(
+            self.user_keymap_file.as_ref(),
+            &self.plugin_keymaps,
+        ));
+        self.shared_user_keymap = self
+            .user_keymap_file
+            .as_ref()
+            .and_then(|file| crate::input::keymap::redact_commands(&file.text));
+        self.keymap_revision = self.keymap_revision.saturating_add(1);
+        self.endpoint_commands =
+            custom_commands::EndpointCommandRegistry::new(&self.keymap.commands);
+    }
+
+    /// Whether a client needs the keymap projection: the server contributes
+    /// layers, the client uses the server's keymap, or the client holds
+    /// layers that must be cleared.
+    pub(crate) fn keymap_projection_needed(
+        &self,
+        uses_endpoint_keybindings: bool,
+        sent: bool,
+    ) -> bool {
+        sent || uses_endpoint_keybindings
+            || !self.plugin_keymaps.is_empty()
+            || self.shared_user_keymap.is_some()
+    }
+
+    /// The keymap layers clients need to resolve keys like the server does.
+    pub(crate) fn keymap_projection(
+        &self,
+        boot_id: &str,
+    ) -> crate::protocol::endpoint::EndpointKeymapProjection {
+        crate::protocol::endpoint::EndpointKeymapProjection {
+            boot_id: boot_id.to_owned(),
+            revision: self.keymap_revision,
+            plugins: self
+                .plugin_keymaps
+                .iter()
+                .map(
+                    |(plugin_id, file)| crate::protocol::endpoint::EndpointKeymapLayer {
+                        plugin_id: plugin_id.clone(),
+                        source: file.source.clone(),
+                        text: file.text.clone(),
+                    },
+                )
+                .collect(),
+            server_keymap: self.shared_user_keymap.clone(),
+        }
     }
 
     fn apply_live_config(
@@ -796,28 +863,9 @@ impl App {
         let invalid_section =
             |section: &str| invalid_sections.iter().any(|invalid| invalid == section);
 
-        if !invalid_section("keys") {
-            match config.live_keybinds_with_diagnostics() {
-                Ok((live, keybind_diagnostics)) => {
-                    self.state.prefix_code = live.prefix.0;
-                    self.state.prefix_mods = live.prefix.1;
-                    self.state.keybinds = live.keybinds;
-                    match config.local_keybindings_profile_toml() {
-                        Ok(profile) => self.client_shell_keybindings_profile = Some(profile),
-                        Err(err) => diagnostics.push(format!(
-                            "failed to publish server keybindings: {err}; kept previous keybindings"
-                        )),
-                    }
-                    diagnostics.extend(keybind_diagnostics);
-                }
-                Err(keybind_diagnostics) => {
-                    diagnostics.extend(
-                        keybind_diagnostics
-                            .into_iter()
-                            .map(|diagnostic| format!("{diagnostic}; kept current keybinds")),
-                    );
-                }
-            }
+        if !invalid_section("keymap") {
+            self.user_keymap_file = config.keymap_file.clone();
+            self.rebuild_keymap();
         }
 
         if !invalid_section("ui") {
@@ -997,7 +1045,7 @@ mod tests {
     use crate::config::Config;
     use crate::detect::{Agent, AgentState};
     use crate::workspace::Workspace;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::event::{KeyCode, KeyModifiers};
     use std::sync::Mutex;
 
     fn test_app() -> App {
@@ -1687,6 +1735,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
+    fn write_keymap(config_path: &std::path::Path, text: &str) {
+        std::fs::write(config_path.with_file_name("keymap.kdl"), text).unwrap();
+    }
+
+    /// The catalog action bound to `chord` in the menu at `path`.
+    fn keymap_binding(app: &App, path: &str, chord: &str) -> Option<&'static str> {
+        let keymap = &app.keymap;
+        let menu = keymap.menu_by_path(path)?;
+        let chord = crate::input::keymap::Chord::parse(chord).ok()?;
+        keymap
+            .menu(menu)
+            .bindings
+            .iter()
+            .find(|binding| binding.chord == chord)
+            .and_then(crate::input::keymap::binding_action_id)
+    }
+
     #[test]
     fn reload_config_updates_live_state() {
         let _guard = config_env_lock().lock().unwrap();
@@ -1694,9 +1759,10 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
             &path,
-            "[terminal]\ndefault_shell = \"nu\"\nshell_mode = \"non_login\"\nnew_cwd = \"home\"\n[keys]\nnew_workspace = \"prefix+m\"\nprefix = \"ctrl+a\"\n[update]\nversion_check = false\nmanifest_check = false\n[server]\nheadless_cols = 160\nheadless_rows = 50\n[ui]\nagent_panel_sort = \"priority\"\n[ui.toast]\ndelivery = \"herdr\"\n",
+            "[terminal]\ndefault_shell = \"nu\"\nshell_mode = \"non_login\"\nnew_cwd = \"home\"\n[update]\nversion_check = false\nmanifest_check = false\n[server]\nheadless_cols = 160\nheadless_rows = 50\n[ui]\nagent_panel_sort = \"priority\"\n[ui.toast]\ndelivery = \"herdr\"\n",
         )
         .unwrap();
+        write_keymap(&path, "base prefix=ctrl+a\nprefix { m workspace.new }\n");
         std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
 
         let mut app = test_app();
@@ -1706,13 +1772,11 @@ mod tests {
 
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
         assert_eq!(app.state.headless_size, (160, 50));
-        assert_eq!(app.state.prefix_code, KeyCode::Char('a'));
-        assert_eq!(app.state.prefix_mods, KeyModifiers::CONTROL);
-        assert!(app
-            .state
-            .keybinds
-            .new_workspace
-            .matches_prefix(&KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty())));
+        assert_eq!(
+            app.keymap.prefix,
+            (KeyCode::Char('a'), KeyModifiers::CONTROL)
+        );
+        assert_eq!(keymap_binding(&app, "ctrl+a", "m"), Some("workspace.new"));
         assert_eq!(
             app.state.toast_config.delivery,
             crate::config::ToastDelivery::Herdr
@@ -1796,7 +1860,8 @@ mod tests {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-key-only");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "[keys]\nprefix = \"ctrl+a\"\n").unwrap();
+        std::fs::write(&path, "").unwrap();
+        write_keymap(&path, "base prefix=ctrl+a\n");
         std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
 
         let mut app = test_app();
@@ -1804,7 +1869,7 @@ mod tests {
         let report = app.reload_config();
 
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
-        assert_eq!(app.state.prefix_code, KeyCode::Char('a'));
+        assert_eq!(app.keymap.prefix.0, KeyCode::Char('a'));
         assert!(app.state.request_client_config_reload);
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
@@ -1951,26 +2016,28 @@ mod tests {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-invalid-keybind");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
+        std::fs::write(&path, "[ui.toast]\ndelivery = \"terminal\"\n").unwrap();
+        write_keymap(
             &path,
-            "[keys]\nnew_workspace = \"wat\"\n[ui.toast]\ndelivery = \"terminal\"\n",
-        )
-        .unwrap();
+            "prefix {\n  t {\n    n tab.nwe\n    c tab.new\n  }\n}\n",
+        );
         std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
 
         let mut app = test_app();
-        let original_prefix = (app.state.prefix_code, app.state.prefix_mods);
+        let original_prefix = app.keymap.prefix;
         let report = app.reload_config();
 
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Partial);
         assert!(report.diagnostics.iter().any(|diagnostic| {
-            diagnostic.contains("keys.new_workspace") && diagnostic.contains("disabling binding")
+            diagnostic.contains("keymap.kdl:3") && diagnostic.contains("unknown action")
         }));
+        assert_eq!(app.keymap.prefix, original_prefix);
         assert_eq!(
-            (app.state.prefix_code, app.state.prefix_mods),
-            original_prefix
+            keymap_binding(&app, "ctrl+b t", "n"),
+            Some("tab.new"),
+            "an invalid override keeps the default binding"
         );
-        assert!(app.state.keybinds.new_workspace.bindings.is_empty());
+        assert_eq!(keymap_binding(&app, "ctrl+b t", "c"), Some("tab.new"));
         assert_eq!(
             app.state.toast_config.delivery,
             crate::config::ToastDelivery::Terminal
@@ -2016,25 +2083,25 @@ mod tests {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-user-binding-displaces-default");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
+        std::fs::write(&path, "").unwrap();
+        write_keymap(
             &path,
-            "[keys]\nprefix = \"ctrl+space\"\nprevious_workspace = \"prefix+shift+l\"\n",
-        )
-        .unwrap();
+            "base classic prefix=ctrl+space\nprefix { L workspace.previous }\n",
+        );
         std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
 
         let mut app = test_app();
         let report = app.reload_config();
 
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
-        assert_eq!(app.state.prefix_code, KeyCode::Char(' '));
-        assert_eq!(app.state.prefix_mods, KeyModifiers::CONTROL);
-        assert!(app
-            .state
-            .keybinds
-            .previous_workspace
-            .matches_prefix(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::SHIFT)));
-        assert!(app.state.keybinds.swap_pane_right.bindings.is_empty());
+        assert_eq!(
+            app.keymap.prefix,
+            (KeyCode::Char(' '), KeyModifiers::CONTROL)
+        );
+        assert_eq!(
+            keymap_binding(&app, "ctrl+space", "L"),
+            Some("workspace.previous")
+        );
         assert!(app.state.config_diagnostic.is_none());
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
@@ -2046,11 +2113,8 @@ mod tests {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-invalid-ui-section");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &path,
-            "[keys]\nnew_workspace = \"prefix+m\"\n[ui.toast]\ndelivery = \"desktop\"\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "[ui.toast]\ndelivery = \"desktop\"\n").unwrap();
+        write_keymap(&path, "prefix { m workspace.new }\n");
         std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
 
         let mut app = test_app();
@@ -2062,11 +2126,7 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.contains("invalid ui config")));
-        assert!(app
-            .state
-            .keybinds
-            .new_workspace
-            .matches_prefix(&KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty())));
+        assert_eq!(keymap_binding(&app, "ctrl+b", "m"), Some("workspace.new"));
         assert_eq!(
             app.state.toast_config.delivery,
             crate::config::ToastDelivery::Herdr
@@ -2117,17 +2177,12 @@ mod tests {
         std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
 
         let mut app = test_app();
-        let original_prefix = (app.state.prefix_code, app.state.prefix_mods);
-        let original_keybinds = app.state.keybinds.new_workspace.clone();
+        let original_keymap = std::sync::Arc::clone(&app.keymap);
         let original_toast_delivery = app.state.toast_config.delivery;
         let report = app.reload_config();
 
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Failed);
-        assert_eq!(
-            (app.state.prefix_code, app.state.prefix_mods),
-            original_prefix
-        );
-        assert_eq!(app.state.keybinds.new_workspace, original_keybinds);
+        assert!(std::sync::Arc::ptr_eq(&app.keymap, &original_keymap));
         assert_eq!(app.state.toast_config.delivery, original_toast_delivery);
         assert!(app
             .state

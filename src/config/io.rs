@@ -4,9 +4,13 @@ use tracing::warn;
 
 use super::{model::LoadedConfig, Config, CONFIG_PATH_ENV_VAR};
 
+/// Overrides the keymap file location, like `HERDR_CONFIG_PATH` for config.toml.
+pub const KEYMAP_PATH_ENV_VAR: &str = "HERDR_KEYMAP_PATH";
+
 const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "advanced",
     "experimental",
+    "keymap",
     "keys",
     "onboarding",
     "remote",
@@ -127,8 +131,63 @@ pub(super) fn read_optional_config(path: &Path) -> std::io::Result<Option<String
     }
 }
 
+/// Where the keymap file lives: `HERDR_KEYMAP_PATH`, then `[keymap] path`,
+/// then `keymap.kdl` next to config.toml.
+pub fn keymap_path(config: &Config) -> PathBuf {
+    if let Ok(path) = std::env::var(KEYMAP_PATH_ENV_VAR) {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    match config.keymap.path.as_deref().map(str::trim) {
+        Some(path) if !path.is_empty() => resolve_config_relative_path(Path::new(path)),
+        _ => resolve_config_relative_path(Path::new("keymap.kdl")),
+    }
+}
+
+/// Read the user's keymap file into the config. A missing file means the
+/// default tree; an unreadable one keeps the current keymap on live reload.
+fn load_keymap_file(config: &mut Config, diagnostics: &mut Vec<String>) -> bool {
+    let path = keymap_path(config);
+    match read_optional_config(&path) {
+        Ok(Some(text)) => {
+            let source = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("keymap.kdl")
+                .to_owned();
+            config.keymap_file = Some(crate::input::keymap::KeymapText { source, text });
+            true
+        }
+        Ok(None) => {
+            config.keymap_file = None;
+            true
+        }
+        Err(err) => {
+            warn!(err = %err, path = %path.display(), "keymap read error");
+            diagnostics.push(format!(
+                "keymap read error: {}: {err}; using the default keymap",
+                path.display()
+            ));
+            config.keymap_file = None;
+            false
+        }
+    }
+}
+
 impl Config {
     pub fn load() -> LoadedConfig {
+        let mut loaded = Self::load_toml();
+        load_keymap_file(&mut loaded.config, &mut loaded.diagnostics);
+        if loaded.config.keymap_file.is_some() {
+            loaded
+                .diagnostics
+                .extend(loaded.config.keymap().diagnostics);
+        }
+        loaded
+    }
+
+    fn load_toml() -> LoadedConfig {
         let path = config_path();
         let content = match read_optional_config(&path) {
             Ok(Some(content)) => content,
@@ -244,22 +303,27 @@ pub fn config_diagnostic_summary(diagnostics: &[String]) -> Option<String> {
 
 pub fn load_live_config() -> Result<LoadedConfig, Vec<String>> {
     let path = config_path();
-    let content = match read_optional_config(&path) {
-        Ok(Some(content)) => content,
-        Ok(None) => {
-            return Ok(LoadedConfig {
-                config: Config::default(),
-                diagnostics: Vec::new(),
-                invalid_sections: Vec::new(),
-            });
-        }
+    let mut loaded = match read_optional_config(&path) {
+        Ok(Some(content)) => load_live_config_from_str(&content)?,
+        Ok(None) => LoadedConfig {
+            config: Config::default(),
+            diagnostics: Vec::new(),
+            invalid_sections: Vec::new(),
+        },
         Err(err) => {
             return Err(vec![format!(
                 "config read error: {err}; keeping current config"
             )]);
         }
     };
-    load_live_config_from_str(&content)
+    if load_keymap_file(&mut loaded.config, &mut loaded.diagnostics) {
+        loaded
+            .diagnostics
+            .extend(loaded.config.keymap().diagnostics);
+    } else {
+        loaded.invalid_sections.push("keymap".to_owned());
+    }
+    Ok(loaded)
 }
 
 fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>> {
@@ -302,6 +366,15 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
         &mut diagnostics,
         &mut invalid_sections,
         |section| config.keys = section,
+    );
+    diagnostics.extend(config.legacy_keys_diagnostic());
+    load_live_section(
+        table,
+        "keymap",
+        "keymap config",
+        &mut diagnostics,
+        &mut invalid_sections,
+        |section| config.keymap = section,
     );
     load_live_section(
         table,
@@ -980,8 +1053,7 @@ claude = [["terminal_title"]]
             vec![
                 "unknown config key plugin; ignoring key",
                 "unknown config key theme.custom.accentt; ignoring key",
-                "unknown config key keys.command.0.descrption; ignoring key",
-                "unknown config key keys.new_tabb; ignoring key",
+                "keys.* keybindings are no longer read; keys live in keymap.kdl now (herdr keymap migrate converts them)",
                 "unknown config key ui.\"foo.?.bar\"; ignoring key",
                 "unknown config key ui.\"foo.bar\"; ignoring key",
                 "unknown config key ui.mouse_captur; ignoring key",
@@ -995,13 +1067,7 @@ claude = [["terminal_title"]]
             loaded.config.ui.toast.delivery,
             super::super::ToastDelivery::Herdr
         );
-        assert!(loaded
-            .config
-            .keybinds()
-            .zoom
-            .bindings
-            .iter()
-            .any(|binding| binding.label == "prefix+z"));
+        assert!(loaded.config.keys.is_some());
     }
 
     #[test]

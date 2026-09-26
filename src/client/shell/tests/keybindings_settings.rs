@@ -5,7 +5,7 @@ fn shell_new_controls_use_the_same_client_action_routes_as_keybinds() {
     let mut config = Config::default();
     config.ui.prompt_new_workspace_name = false;
     config.ui.prompt_new_tab_name = true;
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state = ClientShellState::new(test_shell_config(&config));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("composed frame");
@@ -51,8 +51,7 @@ fn manual_client_chrome_preferences_round_trip_per_endpoint() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&path);
-    let config =
-        ClientShellConfig::from_config(&Config::default()).with_preferences_path(path.clone());
+    let config = test_shell_config(&Config::default()).with_preferences_path(path.clone());
     let mut state = ClientShellState::new(config);
     state.sidebar_width = 31;
     state.sidebar_width_manual = true;
@@ -75,8 +74,7 @@ fn manual_client_chrome_preferences_round_trip_per_endpoint() {
     assert!(!stored.contains(&profile.label));
     assert!(!stored.contains(&profile.target));
 
-    let reloaded_config =
-        ClientShellConfig::from_config(&Config::default()).with_preferences_path(path.clone());
+    let reloaded_config = test_shell_config(&Config::default()).with_preferences_path(path.clone());
     let reloaded = ClientShellState::new(reloaded_config);
     assert_eq!(reloaded.sidebar_width, 31);
     assert!(reloaded.sidebar_width_manual);
@@ -126,7 +124,7 @@ fn tab_bar_renders_endpoint_status_ellipses_and_clamps_to_useful_scroll() {
             agent_status: AgentStatus::Idle,
         });
     }
-    let mut config = ClientShellConfig::from_config(&Config::default());
+    let mut config = test_shell_config(&Config::default());
     config.mobile_width_threshold = 0;
     let mut state = ClientShellState::new(config);
     state.set_snapshot(Box::new(projected));
@@ -177,7 +175,7 @@ fn inactive_auto_named_tab_label_does_not_stack_terminal_faint() {
         focused: false,
         agent_status: AgentStatus::Idle,
     });
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
     let frame = state.compose(106, 20).expect("tab bar frame");
@@ -199,14 +197,12 @@ fn inactive_auto_named_tab_label_does_not_stack_terminal_faint() {
 
 #[test]
 fn configured_prefix_is_client_owned_and_renders_its_bar() {
-    let config = toml::from_str::<Config>(
+    let config = config_with_keymap(
         r#"
-[keys]
-prefix = "ctrl+a"
-detach = "prefix+x"
+base classic prefix=ctrl+a
+prefix { x app.detach }
 "#,
-    )
-    .expect("configured keybinds");
+    );
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
@@ -244,7 +240,7 @@ detach = "prefix+x"
 fn prefix_endpoint_action_uses_public_api_with_stable_ids() {
     let mut config = Config::default();
     config.ui.prompt_new_tab_name = false;
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state = ClientShellState::new(test_shell_config(&config));
     state.set_snapshot(Box::new(snapshot()));
 
     assert!(state.handle_input_bytes(&[0x02]).actions.is_empty());
@@ -266,157 +262,94 @@ fn prefix_endpoint_action_uses_public_api_with_stable_ids() {
     assert!(state.pending_requests.contains_key(&request.id));
 }
 
+fn command_invocation(outcome: &ClientShellInput) -> Option<String> {
+    outcome.actions.iter().find_map(|action| match action {
+        ClientShellAction::Endpoint { request, .. } => match &request.method {
+            crate::api::schema::Method::CommandInvoke(params) => Some(params.command_id.clone()),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
 #[test]
-fn remote_keybinding_sources_keep_local_commands_off_endpoints_and_apply_server_profiles() {
-    let local: Config = toml::from_str(
+fn keymap_commands_find_endpoint_ids_by_chord_path() {
+    let local = config_with_keymap(
         r#"
-[keys]
-prefix = "ctrl+a"
-new_tab = "prefix+c"
-
-[[keys.command]]
-key = "prefix+c"
-command = "local-only"
+base classic prefix=ctrl+a
+prefix { y shell "local-only" }
 "#,
-    )
-    .unwrap();
-    let remote_local = ClientShellConfig::from_config(&local)
-        .with_keybinding_source(ClientShellKeybindingSource::RemoteLocal);
-    assert_eq!(remote_local.keybinds.prefix.0, KeyCode::Char('a'));
-    assert!(remote_local.keybinds.keybinds.custom_commands.is_empty());
+    );
+    let manifest = |command_id: &str| crate::protocol::ClientShellCommand {
+        command_id: command_id.into(),
+        binding_label: "ctrl+a y".into(),
+        binding_labels: vec!["ctrl+a y".into()],
+        action: crate::protocol::ClientShellCommandAction::Shell,
+        description: Some("local-only".into()),
+    };
+
+    let mut remote_state = ClientShellState::new(
+        ClientShellConfig::from_config(&local)
+            .with_keybinding_source(ClientShellKeybindingSource::RemoteLocal),
+    );
+    let mut remote_projection = snapshot();
+    remote_projection.commands.push(manifest("cmd_remote"));
+    remote_state.set_snapshot(Box::new(remote_projection));
+    assert_eq!(remote_state.config.keymap.prefix.0, KeyCode::Char('a'));
+    remote_state.handle_input_bytes(&[0x01]);
+    let outcome = remote_state.handle_input_bytes(b"y");
     assert_eq!(
-        remote_local.keybinds.keybinds.new_tab.label().as_deref(),
-        Some("prefix+c")
+        command_invocation(&outcome),
+        None,
+        "local commands never run on a remote server"
     );
 
-    let mut local_state = ClientShellState::new(
-        ClientShellConfig::from_config(&local)
-            .with_keybinding_source(ClientShellKeybindingSource::Local),
-    );
+    let mut local_state = ClientShellState::new(ClientShellConfig::from_config(&local));
     let mut local_projection = snapshot();
     local_projection
         .commands
-        .push(crate::protocol::ClientShellCommand {
-            command_id: "cmd_loaded_endpoint".into(),
-            binding_label: "prefix+c / prefix+y".into(),
-            binding_labels: vec!["prefix+c".into(), "prefix+y".into()],
-            action: crate::protocol::ClientShellCommandAction::Shell,
-            description: Some("loaded endpoint command".into()),
-        });
+        .push(manifest("cmd_loaded_endpoint"));
     local_state.set_snapshot(Box::new(local_projection));
+    local_state.handle_input_bytes(&[0x01]);
+    let outcome = local_state.handle_input_bytes(b"y");
     assert_eq!(
-        local_state.config.keybinds.keybinds.custom_commands[0].label,
-        "prefix+y"
-    );
-    assert_eq!(
-        local_state
-            .config
-            .keybinds
-            .keybinds
-            .new_tab
-            .label()
-            .as_deref(),
-        Some("prefix+c")
-    );
-    let mut command_outcome = ClientShellInput::default();
-    local_state.record_binding(
-        crate::input::KeybindMatch::Command(
-            local_state.config.keybinds.keybinds.custom_commands[0].clone(),
-        ),
-        &mut command_outcome,
-    );
-    let [ClientShellAction::Endpoint { request, .. }] = &command_outcome.actions[..] else {
-        panic!("expected surviving endpoint command binding");
-    };
-    let crate::api::schema::Method::CommandInvoke(params) = &request.method else {
-        panic!("expected command invocation");
-    };
-    assert_eq!(params.command_id, "cmd_loaded_endpoint");
-
-    let mut id_only_projection = snapshot();
-    id_only_projection.revision = 2;
-    id_only_projection
-        .commands
-        .push(crate::protocol::ClientShellCommand {
-            command_id: "cmd_reloaded_endpoint".into(),
-            binding_label: "prefix+c / prefix+y".into(),
-            binding_labels: vec!["prefix+c".into(), "prefix+y".into()],
-            action: crate::protocol::ClientShellCommandAction::Shell,
-            description: Some("loaded endpoint command".into()),
-        });
-    local_state.mode = ClientShellMode::Prefix;
-    local_state.set_snapshot(Box::new(id_only_projection));
-    assert_eq!(local_state.mode, ClientShellMode::Prefix);
-    assert_eq!(
-        local_state.config.keybinds.keybinds.custom_commands[0].command,
-        "cmd_reloaded_endpoint"
+        command_invocation(&outcome).as_deref(),
+        Some("cmd_loaded_endpoint")
     );
 
-    let endpoint: Config = toml::from_str(
-        r#"
-[keys]
-prefix = "ctrl+x"
-new_tab = "prefix+n"
-"#,
-    )
-    .unwrap();
-    let mut state = ClientShellState::new(
-        ClientShellConfig::from_config(&local)
-            .with_keybinding_source(ClientShellKeybindingSource::Endpoint),
-    );
-    let mut projection = snapshot();
-    projection.server_keybindings_toml = endpoint.local_keybindings_profile_toml().ok();
-    projection
-        .commands
-        .push(crate::protocol::ClientShellCommand {
-            command_id: "cmd_remote".into(),
-            binding_label: "prefix+z".into(),
-            binding_labels: vec!["prefix+z".into()],
-            action: crate::protocol::ClientShellCommandAction::Shell,
-            description: Some("remote command".into()),
-        });
-    state.set_snapshot(Box::new(projection));
-
-    assert_eq!(state.config.keybinds.prefix.0, KeyCode::Char('x'));
+    let mut reloaded = snapshot();
+    reloaded.revision = 2;
+    reloaded.commands.push(manifest("cmd_reloaded_endpoint"));
+    local_state.handle_input_bytes(&[0x01]);
+    assert_eq!(local_state.mode_name(), "prefix");
+    local_state.set_snapshot(Box::new(reloaded));
     assert_eq!(
-        state.config.keybinds.keybinds.new_tab.label().as_deref(),
-        Some("prefix+n")
+        local_state.mode_name(),
+        "prefix",
+        "new command ids do not close open menus"
     );
+    let outcome = local_state.handle_input_bytes(b"y");
     assert_eq!(
-        state.config.keybinds.keybinds.custom_commands[0].label,
-        "prefix+z"
-    );
-    assert_eq!(
-        state.config.keybinds.keybinds.custom_commands[0]
-            .description
-            .as_deref(),
-        Some("remote command")
-    );
-    assert_eq!(
-        state.config.keybinds.keybinds.custom_commands[0].command,
-        "cmd_remote"
+        command_invocation(&outcome).as_deref(),
+        Some("cmd_reloaded_endpoint")
     );
 }
 
 #[test]
 fn custom_binding_invokes_only_the_endpoint_manifest_id() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    let binding = crate::config::CustomCommandKeybind {
-        bindings: crate::config::ActionKeybinds::prefix("z"),
-        label: "prefix+z".into(),
-        command: "secret-command --token hidden".into(),
-        action: crate::config::CustomCommandAction::Shell,
-        description: None,
-        width: None,
-        height: None,
-    };
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
+    let binding = command_leaf(
+        "ctrl+b z",
+        crate::input::keymap::CommandKind::Shell,
+        "secret-command --token hidden",
+    );
     let mut projection = snapshot();
     projection
         .commands
         .push(crate::protocol::ClientShellCommand {
             command_id: "cmd_0123456789abcdef0123456789abcdef".into(),
-            binding_label: binding.label.clone(),
-            binding_labels: binding.bindings.labels(),
+            binding_label: binding.path_label.clone(),
+            binding_labels: vec![binding.path_label.clone()],
             action: crate::protocol::ClientShellCommandAction::Shell,
             description: None,
         });
@@ -443,23 +376,19 @@ fn custom_binding_invokes_only_the_endpoint_manifest_id() {
 
 #[test]
 fn plugin_command_carries_client_owned_selection_coordinates() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    let binding = crate::config::CustomCommandKeybind {
-        bindings: crate::config::ActionKeybinds::prefix("p"),
-        label: "prefix+p".into(),
-        command: "plugin.action".into(),
-        action: crate::config::CustomCommandAction::PluginAction,
-        description: None,
-        width: None,
-        height: None,
-    };
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
+    let binding = command_leaf(
+        "ctrl+b p",
+        crate::input::keymap::CommandKind::Plugin,
+        "plugin.action",
+    );
     let mut projection = snapshot();
     projection
         .commands
         .push(crate::protocol::ClientShellCommand {
             command_id: "cmd_plugin".into(),
-            binding_label: binding.label.clone(),
-            binding_labels: binding.bindings.labels(),
+            binding_label: binding.path_label.clone(),
+            binding_labels: vec![binding.path_label.clone()],
             action: crate::protocol::ClientShellCommandAction::PluginAction,
             description: None,
         });
@@ -494,7 +423,7 @@ fn plugin_command_carries_client_owned_selection_coordinates() {
 
 #[test]
 fn unavailable_endpoint_method_is_disabled_without_disconnect() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.set_endpoint_methods(Some(vec!["pane.focus".into()]));
@@ -548,7 +477,7 @@ fn unavailable_endpoint_method_is_disabled_without_disconnect() {
 
 #[test]
 fn generic_endpoint_failures_and_control_errors_are_visible() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     let mut outcome = ClientShellInput::default();
     state.push_endpoint_method(
@@ -604,7 +533,7 @@ fn generic_endpoint_failures_and_control_errors_are_visible() {
 
 #[test]
 fn endpoint_timeout_is_a_deduplicated_server_notice() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     let mut outcome = ClientShellInput::default();
     state.push_endpoint_method(
@@ -641,7 +570,7 @@ fn endpoint_timeout_is_a_deduplicated_server_notice() {
 
 #[test]
 fn endpoint_notice_dedupe_resets_for_a_new_server_boot() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_endpoint_methods(Some(Vec::new()));
     let method = || {
@@ -671,17 +600,13 @@ fn endpoint_notice_dedupe_resets_for_a_new_server_boot() {
 
 #[test]
 fn custom_binding_missing_from_endpoint_manifest_is_not_forwarded() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
-    let binding = crate::config::CustomCommandKeybind {
-        bindings: crate::config::ActionKeybinds::prefix("z"),
-        label: "prefix+z".into(),
-        command: "secret-command".into(),
-        action: crate::config::CustomCommandAction::Shell,
-        description: None,
-        width: None,
-        height: None,
-    };
+    let binding = command_leaf(
+        "ctrl+b z",
+        crate::input::keymap::CommandKind::Shell,
+        "secret-command",
+    );
 
     let mut outcome = ClientShellInput::default();
     state.record_binding(crate::input::KeybindMatch::Command(binding), &mut outcome);
@@ -696,14 +621,20 @@ fn custom_binding_missing_from_endpoint_manifest_is_not_forwarded() {
 
 #[test]
 fn help_overlay_restores_released_search_scroll_and_custom_binding_behavior() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let config = config_with_keymap(
+        r#"
+base classic
+prefix { z plugin "example.run" "run plugin action" }
+"#,
+    );
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     let mut projection = snapshot();
     projection
         .commands
         .push(crate::protocol::ClientShellCommand {
             command_id: "plugin-action".into(),
-            binding_label: "prefix+z".into(),
-            binding_labels: vec!["prefix+z".into()],
+            binding_label: "ctrl+b z".into(),
+            binding_labels: vec!["ctrl+b z".into()],
             action: crate::protocol::ClientShellCommandAction::PluginAction,
             description: Some("run plugin action".into()),
         });
@@ -725,7 +656,7 @@ fn help_overlay_restores_released_search_scroll_and_custom_binding_behavior() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("global"));
+    assert!(text.contains("prefix"));
     assert!(state.hits.help_max_scroll > 0);
     assert_ne!(state.hits.help_scrollbar, Rect::default());
 
@@ -742,7 +673,7 @@ fn help_overlay_restores_released_search_scroll_and_custom_binding_behavior() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("custom"));
+    assert!(text.contains("ctrl+b z"));
     assert!(text.contains("run plugin action"));
     state.handle_input_bytes(b"\x1b");
 
@@ -791,13 +722,13 @@ fn help_overlay_restores_released_search_scroll_and_custom_binding_behavior() {
 
 #[test]
 fn resize_mode_reuses_endpoint_resize_and_stays_active_until_done() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
 
     assert!(state.handle_input_bytes(&[0x02]).actions.is_empty());
     assert!(state.handle_input_bytes(b"r").actions.is_empty());
-    assert_eq!(state.mode, ClientShellMode::Resize);
+    assert_eq!(state.mode_name(), "resize");
 
     let modified = state.handle_input_bytes(b"\x1b[1;2D");
     assert!(matches!(
@@ -809,7 +740,7 @@ fn resize_mode_reuses_endpoint_resize_and_stays_active_until_done() {
                     if params.direction == crate::api::schema::PaneDirection::Left
             )
     ));
-    assert_eq!(state.mode, ClientShellMode::Resize);
+    assert_eq!(state.mode_name(), "resize");
 
     let resize = state.handle_input_bytes(b"h");
     let [ClientShellAction::Endpoint { request, .. }] = &resize.actions[..] else {
@@ -821,8 +752,172 @@ fn resize_mode_reuses_endpoint_resize_and_stays_active_until_done() {
             if params.pane_id.as_deref() == Some("pane_1")
                 && params.direction == crate::api::schema::PaneDirection::Left
     ));
-    assert_eq!(state.mode, ClientShellMode::Resize);
+    assert_eq!(state.mode_name(), "resize");
 
     assert!(state.handle_input_bytes(b"\r").actions.is_empty());
     assert_eq!(state.mode, ClientShellMode::Terminal);
+}
+
+fn keymap_projection(
+    revision: u64,
+    plugins: &[(&str, &str)],
+    server_keymap: Option<&str>,
+) -> crate::protocol::endpoint::EndpointKeymapProjection {
+    crate::protocol::endpoint::EndpointKeymapProjection {
+        boot_id: "boot-1".into(),
+        revision,
+        plugins: plugins
+            .iter()
+            .map(
+                |(plugin_id, text)| crate::protocol::endpoint::EndpointKeymapLayer {
+                    plugin_id: (*plugin_id).into(),
+                    source: format!("{plugin_id}/keymap.kdl"),
+                    text: (*text).into(),
+                },
+            )
+            .collect(),
+        server_keymap: server_keymap.map(str::to_owned),
+    }
+}
+
+fn tab_created(outcome: &ClientShellInput) -> bool {
+    outcome.actions.iter().any(|action| {
+        matches!(action, ClientShellAction::Endpoint { request, .. }
+            if matches!(request.method, crate::api::schema::Method::TabCreate(_)))
+    })
+}
+
+#[test]
+fn server_plugin_menus_join_the_local_keymap() {
+    let mut config = Config::default();
+    config.ui.prompt_new_tab_name = false;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut projection_snapshot = snapshot();
+    projection_snapshot
+        .commands
+        .push(crate::protocol::ClientShellCommand {
+            command_id: "cmd_layout".into(),
+            binding_label: "ctrl+b p g".into(),
+            binding_labels: vec!["ctrl+b p g".into()],
+            action: crate::protocol::ClientShellCommandAction::PluginAction,
+            description: Some("layout".into()),
+        });
+    state.set_snapshot(Box::new(projection_snapshot));
+    state.set_endpoint_keymap_projection(
+        &ClientEndpointId::Local,
+        keymap_projection(
+            2,
+            &[("example.layout", "prefix { p { g plugin apply layout } }")],
+            Some("prefix { t { c tab.new } }"),
+        ),
+    );
+
+    state.handle_input_bytes(&[0x02]);
+    state.handle_input_bytes(b"p");
+    let outcome = state.handle_input_bytes(b"g");
+    assert_eq!(command_invocation(&outcome).as_deref(), Some("cmd_layout"));
+
+    state.handle_input_bytes(&[0x02]);
+    state.handle_input_bytes(b"t");
+    let outcome = state.handle_input_bytes(b"c");
+    assert!(
+        !tab_created(&outcome),
+        "the local keymap applies, not the server's"
+    );
+
+    state.handle_input_bytes(&[0x02]);
+    assert_eq!(state.mode_name(), "herdra");
+    state.set_endpoint_keymap_projection(&ClientEndpointId::Local, keymap_projection(1, &[], None));
+    assert_eq!(state.mode_name(), "herdra", "stale projections are ignored");
+    state.set_endpoint_keymap_projection(&ClientEndpointId::Local, keymap_projection(3, &[], None));
+    assert_eq!(
+        state.mode,
+        ClientShellMode::Terminal,
+        "a new keymap closes menus"
+    );
+    state.handle_input_bytes(&[0x02]);
+    state.handle_input_bytes(b"p");
+    let outcome = state.handle_input_bytes(b"g");
+    assert_eq!(command_invocation(&outcome), None);
+}
+
+#[test]
+fn server_keybinding_source_uses_the_server_keymap() {
+    let mut config = config_with_keymap("base classic");
+    config.ui.prompt_new_tab_name = false;
+    let mut state = ClientShellState::new(
+        ClientShellConfig::from_config(&config)
+            .with_keybinding_source(ClientShellKeybindingSource::Endpoint),
+    );
+    state.set_snapshot(Box::new(snapshot()));
+    state.handle_input_bytes(&[0x02]);
+    assert!(
+        tab_created(&state.handle_input_bytes(b"c")),
+        "the local keymap applies until the server sends its own"
+    );
+
+    state.set_endpoint_keymap_projection(
+        &ClientEndpointId::Local,
+        keymap_projection(2, &[], Some("prefix { t { c tab.new } }")),
+    );
+    state.handle_input_bytes(&[0x02]);
+    assert!(!tab_created(&state.handle_input_bytes(b"c")));
+    state.handle_input_bytes(&[0x02]);
+    state.handle_input_bytes(b"t");
+    assert!(tab_created(&state.handle_input_bytes(b"c")));
+}
+
+fn frame_text(frame: &crate::client::frame_output::ComposedFrame) -> String {
+    frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn mode_hint_bar_setting_hides_menu_bars_unless_a_menu_asks() {
+    let mut config = config_with_keymap("prefix { t tab bar=full {} }\n");
+    config.ui.mode_hint_bar = crate::config::ModeHintBarConfig::Hidden;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
+        offset_from_bottom: 0,
+        max_offset_from_bottom: 20,
+        viewport_rows: 2,
+    });
+    state.set_pane_surface(pane_surface);
+    let terminal = frame_text(&state.compose(106, 20).expect("terminal frame"));
+
+    state.handle_input_bytes(&[0x02]);
+    assert_eq!(state.mode_name(), "herdra");
+    let hidden = frame_text(&state.compose(106, 20).expect("hidden bar frame"));
+    assert_eq!(hidden, terminal, "the main menu draws no bar");
+
+    state.handle_input_bytes(b"t");
+    assert_eq!(state.mode_name(), "tab");
+    let shown = frame_text(&state.compose(106, 20).expect("tab bar frame"));
+    assert!(shown.contains("esc cancel"), "frame: {shown:?}");
+
+    state.handle_input_bytes(&[0x1b]);
+    state.handle_input_bytes(b"\x02py");
+    assert!(state.copy_mode_focused());
+    let copy = frame_text(&state.compose(106, 20).expect("copy frame"));
+    assert!(
+        !copy.contains("esc cancel") && !copy.contains("yank"),
+        "frame: {copy:?}"
+    );
+
+    state.handle_input_bytes(b"/");
+    let search = frame_text(&state.compose(106, 20).expect("copy search frame"));
+    assert!(
+        search.contains("enter search"),
+        "the search prompt shows without a bar: {search:?}"
+    );
 }

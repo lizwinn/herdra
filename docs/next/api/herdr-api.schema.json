@@ -4776,6 +4776,22 @@
         {
           "properties": {
             "method": {
+              "const": "keymap.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "notification.show",
               "type": "string"
             },
@@ -7494,6 +7510,13 @@
               },
               "type": "array"
             },
+            "keymap": {
+              "description": "Keymap tree file inside the plugin root, merged into the keymap while\nthe plugin is enabled.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "link_handlers": {
               "items": {
                 "$ref": "#/schemas/success_response/$defs/PluginManifestLinkHandler"
@@ -7646,6 +7669,137 @@
           },
           "required": [
             "messages"
+          ],
+          "type": "object"
+        },
+        "KeymapBindingInfo": {
+          "properties": {
+            "chord": {
+              "description": "The chord inside its menu, for example `v`.",
+              "type": "string"
+            },
+            "description": {
+              "description": "Label shown in the keybind help.",
+              "type": "string"
+            },
+            "exit": {
+              "description": "`exit` or `stay` when the key overrides its menu's default.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "hidden": {
+              "type": "boolean"
+            },
+            "hint": {
+              "description": "Label shown in the menu bar.",
+              "type": "string"
+            },
+            "keys": {
+              "description": "The full key sequence from the top level, for example `ctrl+b p v`.",
+              "type": "string"
+            },
+            "kind": {
+              "description": "`action`, `command`, or `menu`.",
+              "type": "string"
+            },
+            "owner": {
+              "description": "`builtin`, `user`, or `plugin:<id>`.",
+              "type": "string"
+            },
+            "target": {
+              "description": "Action id, command, menu path, or menu operation such as `menu.back`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "chord",
+            "keys",
+            "kind",
+            "target",
+            "hint",
+            "description",
+            "hidden",
+            "owner"
+          ],
+          "type": "object"
+        },
+        "KeymapInfo": {
+          "description": "The effective keymap tree: every menu and the keys in it.",
+          "properties": {
+            "base": {
+              "description": "Base tree: `herdra`, `classic`, or `none`.",
+              "type": "string"
+            },
+            "conflicts": {
+              "description": "Plugin keymap problems and keys plugins could not claim.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "diagnostics": {
+              "description": "Problems in the user's keymap file.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "menus": {
+              "description": "Menus in tree order. The first entry, with an empty path, is the top\nlevel where keys otherwise go to the pane.",
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/KeymapMenuInfo"
+              },
+              "type": "array"
+            },
+            "prefix": {
+              "description": "The prefix chord, for example `ctrl+b`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "base",
+            "prefix",
+            "menus"
+          ],
+          "type": "object"
+        },
+        "KeymapMenuInfo": {
+          "properties": {
+            "bindings": {
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/KeymapBindingInfo"
+              },
+              "type": "array"
+            },
+            "mode": {
+              "description": "Whether menu cancels return here, like copy mode.",
+              "type": "boolean"
+            },
+            "path": {
+              "description": "Chords from the top level to this menu, space separated.",
+              "type": "string"
+            },
+            "sticky": {
+              "type": "boolean"
+            },
+            "title": {
+              "type": "string"
+            },
+            "view": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "title",
+            "sticky",
+            "mode",
+            "bindings"
           ],
           "type": "object"
         },
@@ -10064,6 +10218,22 @@
               "required": [
                 "type",
                 "manifests"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "keymap": {
+                  "$ref": "#/schemas/success_response/$defs/KeymapInfo"
+                },
+                "type": {
+                  "const": "keymap",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "keymap"
               ],
               "type": "object"
             },

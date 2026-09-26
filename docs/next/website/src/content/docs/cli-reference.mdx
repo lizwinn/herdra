@@ -24,7 +24,7 @@ herdr --version               # print version
 Optional launch and update settings:
 
 - Add `--session <name>` to use a named session instead of the default.
-- Add `--remote-keybindings server` to remote attach to use server keybindings instead of local ones.
+- Add `--remote-keybindings server` to remote attach to use the server's keymap instead of your local one.
 - Experimental live handoff requires explicit `--handoff` on `herdr --remote` or `herdr update`. It is not the normal setup or connection path; see [Updates](/docs/install/#update).
 
 Status commands:
@@ -116,6 +116,22 @@ fpath=(~/.zfunc $fpath)
 autoload -Uz compinit
 compinit
 ```
+
+## Configuration and keymap
+
+```bash
+herdr config check             # validate config.toml and keymap.kdl
+herdr keymap print             # show the effective keymap tree
+herdr keymap print --json      # the same tree as JSON, for tools
+herdr keymap default           # print the default tree (add `classic` for the one-key layout)
+herdr keymap check [FILE]      # validate a keymap file with line numbers
+herdr keymap path              # print where keymap.kdl is read from
+herdr keymap migrate           # convert [keys] in config.toml into keymap.kdl
+herdr keymap migrate --dry-run # print the converted keymap only
+herdr keymap reset             # move keymap.kdl aside to use the default tree
+```
+
+Both check commands exit with status 1 when they find problems. See [Keymap](/docs/keymap/) for the file format.
 
 ## Server
 

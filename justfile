@@ -130,23 +130,7 @@ release-docs-check:
         fi; \
     done
     @test -d docs/next/website/src/content/docs
-    @for file in docs/next/website/src/content/docs/*.mdx; do \
-        for locale in ja zh-cn; do \
-            translated="docs/next/website/src/content/docs/$locale/$(basename "$file")"; \
-            if [ ! -f "$translated" ]; then \
-                echo "error: $translated is missing; translate next docs before releasing"; \
-                exit 1; \
-            fi; \
-        done; \
-    done
-    @for file in docs/next/website/src/content/docs/ja/*.mdx docs/next/website/src/content/docs/zh-cn/*.mdx; do \
-        staged="docs/next/website/src/content/docs/$(basename "$file")"; \
-        if [ ! -f "$staged" ]; then \
-            echo "error: $file has no matching english doc; remove the stale translation"; \
-            exit 1; \
-        fi; \
-    done
-    python3 scripts/docs_translation_parity.py --docs-root docs/next/website/src/content/docs
+    @echo "note: Herdra documents English only; the ja/zh-cn translation parity gate is off."
 
 # Validate release docs, render scaling, and end-to-end CPU before release preparation
 pre-release-check:

@@ -39,7 +39,7 @@ pub(crate) fn render_client_overlay(
     s: &ClientShellSnapshot,
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
-    k: &LiveKeybindConfig,
+    k: &crate::input::keymap::CompiledKeymap,
     p: &Palette,
 ) -> Option<OverlayRender> {
     if !matches!(
@@ -1037,16 +1037,14 @@ fn render_navigator_overlay(
 }
 
 fn help_lines(
-    keybinds: &LiveKeybindConfig,
+    keymap: &crate::input::keymap::CompiledKeymap,
     query: &str,
     palette: &Palette,
 ) -> Vec<(usize, ratatui::text::Line<'static>)> {
     use ratatui::text::{Line, Span};
 
-    let groups = crate::input::filter_keybind_help_groups(
-        crate::input::keybind_help_groups(&keybinds.keybinds, keybinds.prefix),
-        query,
-    );
+    let groups =
+        crate::input::filter_keybind_help_groups(crate::input::keybind_help_groups(keymap), query);
     let key_width = groups
         .iter()
         .flat_map(|(_, entries)| entries.iter().map(|(key, _)| key.chars().count()))
@@ -1103,7 +1101,7 @@ fn help_lines(
 fn render_help_overlay(
     b: &mut Buffer,
     h: &ClientHelpOverlay,
-    k: &LiveKeybindConfig,
+    k: &crate::input::keymap::CompiledKeymap,
     p: &Palette,
 ) -> Option<OverlayRender> {
     use ratatui::widgets::{Paragraph, Widget, Wrap};

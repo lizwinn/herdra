@@ -1,0 +1,137 @@
+// Herdra's default keymap.
+//
+// Each top-level node is a chord you press while typing in a pane. A node
+// with a block is a menu: its first word is its title, and its children are
+// the keys that work while it is open. Any other node is a leaf that runs an
+// action. `prefix` stands for the prefix chord (ctrl+b unless you set
+// `base prefix=...` in your own keymap.kdl).
+//
+// Menus close after a leaf runs. Leaves marked `stay` keep the menu open, and
+// `sticky` menus keep every leaf open until you press esc. esc cancels,
+// backspace goes back one menu.
+
+prefix herdra id=herdra {
+    prefix menu.literal
+    "?" app.help
+    g app.navigator
+    b app.sidebar
+
+    w workspace view=workspace-list unmatched=ignore {
+        j workspace.list.down move stay
+        k workspace.list.up move stay
+        down workspace.list.down hidden stay
+        up workspace.list.up hidden stay
+        enter workspace.list.open
+        n workspace.new
+        r workspace.rename
+        x workspace.close
+        "[" workspace.previous cycle stay
+        "]" workspace.next cycle stay
+        "1..9" workspace.switch
+        t worktree {
+            n worktree.new
+            o worktree.open
+            d worktree.remove
+        }
+    }
+
+    t tab {
+        n tab.new
+        r tab.rename
+        x tab.close
+        "[" tab.previous cycle stay
+        "]" tab.next cycle stay
+        h tab.move.left move stay
+        l tab.move.right move stay
+        "1..9" tab.switch
+    }
+
+    p pane {
+        h pane.focus.left focus stay
+        j pane.focus.down focus stay
+        k pane.focus.up focus stay
+        l pane.focus.right focus stay
+        H pane.swap.left swap stay
+        J pane.swap.down swap stay
+        K pane.swap.up swap stay
+        L pane.swap.right swap stay
+        tab pane.cycle.next stay
+        shift+tab pane.cycle.previous hidden stay
+        o pane.last
+        v pane.split.right
+        "-" pane.split.down
+        x pane.close
+        z pane.zoom
+        n pane.rename
+        e pane.scrollback
+        c pane.clear
+
+        r resize sticky id=resize {
+            h pane.resize.left resize
+            j pane.resize.down resize
+            k pane.resize.up resize
+            l pane.resize.right resize
+            left pane.resize.left hidden
+            down pane.resize.down hidden
+            up pane.resize.up hidden
+            right pane.resize.right hidden
+            enter menu.cancel done
+        }
+
+        y copy mode view=copy id=copy {
+            h copy.move.left move
+            j copy.move.down move
+            k copy.move.up move
+            l copy.move.right move
+            left copy.move.left hidden
+            down copy.move.down hidden
+            up copy.move.up hidden
+            right copy.move.right hidden
+            w copy.word.next hidden
+            b copy.word.previous hidden
+            e copy.word.end hidden
+            W copy.bigword.next hidden
+            B copy.bigword.previous hidden
+            E copy.bigword.end hidden
+            "{" copy.paragraph.previous hidden
+            "}" copy.paragraph.next hidden
+            "0" copy.line.start hidden
+            home copy.line.start hidden
+            "$" copy.line.end hidden
+            end copy.line.end hidden
+            "^" copy.line.first-nonblank hidden
+            g copy.history.start hidden
+            G copy.history.end hidden
+            pageup copy.page.up hidden
+            pagedown copy.page.down hidden
+            ctrl+f copy.page.down hidden
+            ctrl+u copy.halfpage.up hidden
+            ctrl+d copy.halfpage.down hidden
+            "/" copy.search.forward
+            "?" copy.search.backward hidden
+            n copy.search.next
+            N copy.search.reverse hidden
+            v copy.select
+            space copy.select hidden
+            V copy.select.line hidden
+            y copy.yank
+            enter copy.yank hidden
+            q copy.exit
+            esc copy.escape
+        }
+    }
+
+    a agent {
+        n agent.next cycle stay
+        p agent.previous cycle stay
+        o agent.notification
+        "1..9" agent.focus
+    }
+
+    s session {
+        s app.settings
+        r app.reload
+        d app.detach
+        w app.whats-new
+    }
+}

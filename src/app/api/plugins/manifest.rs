@@ -31,6 +31,9 @@ struct RawPluginManifest {
     panes: Vec<RawPluginManifestPane>,
     #[serde(default)]
     link_handlers: Vec<RawPluginManifestLinkHandler>,
+    /// Keymap tree file inside the plugin, merged into the keymap.
+    #[serde(default)]
+    keymap: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -198,7 +201,12 @@ pub(crate) fn load_plugin_manifest(
     reject_duplicate_link_handler_ids(&link_handlers)?;
     validate_link_handler_actions(&link_handlers, &actions)?;
 
+    let keymap = validate_plugin_keymap(raw.keymap.as_deref(), &plugin_root, &plugin_id)?;
+
     let mut warnings = validate_event_names(&events);
+    if let Some(keymap) = &keymap {
+        warnings.extend(plugin_keymap_warnings(&plugin_root, &plugin_id, keymap));
+    }
     if platforms.is_none() {
         warnings.push("manifest does not declare platforms; platform support unknown".to_string());
     }
@@ -219,9 +227,66 @@ pub(crate) fn load_plugin_manifest(
         events,
         panes,
         link_handlers,
+        keymap,
         source: Default::default(),
         warnings,
     })
+}
+
+/// Check that a manifest `keymap` names a readable KDL file inside the
+/// plugin. Problems inside the tree are warnings; the plugin still loads.
+fn validate_plugin_keymap(
+    keymap: Option<&str>,
+    plugin_root: &std::path::Path,
+    plugin_id: &str,
+) -> Result<Option<String>, (&'static str, String)> {
+    let Some(keymap) = keymap.map(str::trim) else {
+        return Ok(None);
+    };
+    let relative = std::path::Path::new(keymap);
+    if keymap.is_empty()
+        || relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err((
+            "invalid_plugin_keymap",
+            format!("plugin keymap must be a relative path inside the plugin: {keymap:?}"),
+        ));
+    }
+    let text = std::fs::read_to_string(plugin_root.join(relative)).map_err(|err| {
+        (
+            "invalid_plugin_keymap",
+            format!("cannot read plugin keymap {keymap}: {err}"),
+        )
+    })?;
+    let mut diagnostics = Vec::new();
+    if crate::input::keymap::parse_document(
+        &text,
+        &format!("{plugin_id}/{keymap}"),
+        &mut diagnostics,
+    )
+    .is_none()
+    {
+        return Err(("invalid_plugin_keymap", diagnostics.join("; ")));
+    }
+    Ok(Some(keymap.to_owned()))
+}
+
+fn plugin_keymap_warnings(
+    plugin_root: &std::path::Path,
+    plugin_id: &str,
+    keymap: &str,
+) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(plugin_root.join(keymap)) else {
+        return Vec::new();
+    };
+    let layer = crate::input::keymap::KeymapText {
+        source: format!("{plugin_id}/{keymap}"),
+        text,
+    };
+    crate::input::keymap::CompiledKeymap::build(None, &[(plugin_id.to_owned(), layer)]).conflicts
 }
 
 fn validate_min_herdr_version(value: Option<&str>) -> Result<String, (&'static str, String)> {

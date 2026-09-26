@@ -1,0 +1,149 @@
+// Herdr's classic keymap: every action one key after the prefix.
+//
+// Select it with `base classic` in your keymap.kdl. It matches Herdr's
+// keybindings before the keymap tree existed, including navigate mode
+// falling back to prefix keys.
+
+prefix prefix id=prefix {
+    esc menu.cancel
+    prefix menu.literal
+    "?" app.help
+    s app.settings hidden
+    q app.detach hidden
+    R app.reload hidden
+    o agent.notification hidden
+    g app.navigator hidden
+    N workspace.new hidden
+    G worktree.new hidden
+    W workspace.rename hidden
+    D workspace.close hidden
+    c tab.new hidden
+    T tab.rename hidden
+    p tab.previous hidden
+    n tab.next hidden
+    "1..9" tab.switch hidden
+    X tab.close hidden
+    P pane.rename hidden
+    e pane.scrollback hidden
+    h pane.focus.left hidden
+    j pane.focus.down hidden
+    k pane.focus.up hidden
+    l pane.focus.right hidden
+    H pane.swap.left hidden
+    J pane.swap.down hidden
+    K pane.swap.up hidden
+    L pane.swap.right hidden
+    tab pane.cycle.next hidden
+    shift+tab pane.cycle.previous hidden
+    v pane.split.right hidden
+    "-" pane.split.down hidden
+    x pane.close hidden
+    z pane.zoom hidden
+    b app.sidebar hidden
+
+    w navigate hint="workspace nav" view=workspace-list unmatched=ignore id=navigate {
+        esc menu.cancel back
+        prefix menu.cancel hidden
+        up workspace.list.up workspace stay
+        down workspace.list.down workspace stay
+        enter workspace.list.open hidden
+        "1..9" workspace.switch hidden
+        tab pane.cycle.next pane
+        shift+tab pane.cycle.previous hidden
+        h pane.focus.left hidden stay
+        j pane.focus.down hidden stay
+        k pane.focus.up hidden stay
+        l pane.focus.right hidden stay
+        left pane.focus.left hidden stay
+        right pane.focus.right hidden stay
+        "?" app.help stay
+        s app.settings hidden
+        q app.detach hidden
+        R app.reload hidden
+        o agent.notification hidden
+        g app.navigator hidden
+        N workspace.new hidden
+        G worktree.new hidden
+        W workspace.rename hidden
+        D workspace.close hidden
+        c tab.new hidden
+        T tab.rename hidden
+        p tab.previous hidden
+        n tab.next hidden
+        X tab.close hidden
+        P pane.rename hidden
+        e pane.scrollback hidden
+        H pane.swap.left hidden
+        J pane.swap.down hidden
+        K pane.swap.up hidden
+        L pane.swap.right hidden
+        v pane.split.right hidden
+        "-" pane.split.down hidden
+        x pane.close hidden
+        z pane.zoom hidden
+        b app.sidebar hidden
+        w menu.cancel hidden
+        r menu.open resize hidden
+        "[" menu.open copy hidden
+    }
+
+    r resize sticky hidden id=resize {
+        esc menu.cancel done
+        h pane.resize.left width
+        l pane.resize.right width
+        j pane.resize.down height
+        k pane.resize.up height
+        left pane.resize.left hidden
+        right pane.resize.right hidden
+        down pane.resize.down hidden
+        up pane.resize.up hidden
+        shift+left pane.resize.left hidden
+        shift+right pane.resize.right hidden
+        shift+down pane.resize.down hidden
+        shift+up pane.resize.up hidden
+        enter menu.cancel hidden
+        r menu.cancel hidden
+    }
+
+    "[" copy mode hidden view=copy id=copy {
+        esc copy.escape
+        h copy.move.left hidden
+        j copy.move.down hidden
+        k copy.move.up hidden
+        l copy.move.right hidden
+        left copy.move.left hidden
+        down copy.move.down hidden
+        up copy.move.up hidden
+        right copy.move.right hidden
+        w copy.word.next hidden
+        b copy.word.previous hidden
+        e copy.word.end hidden
+        W copy.bigword.next hidden
+        B copy.bigword.previous hidden
+        E copy.bigword.end hidden
+        "{" copy.paragraph.previous hidden
+        "}" copy.paragraph.next hidden
+        "0" copy.line.start hidden
+        home copy.line.start hidden
+        "$" copy.line.end hidden
+        end copy.line.end hidden
+        "^" copy.line.first-nonblank hidden
+        g copy.history.start hidden
+        G copy.history.end hidden
+        pageup copy.page.up hidden
+        pagedown copy.page.down hidden
+        ctrl+f copy.page.down hidden
+        ctrl+u copy.halfpage.up hidden
+        ctrl+d copy.halfpage.down hidden
+        "/" copy.search.forward search
+        "?" copy.search.backward search
+        n copy.search.next repeat
+        N copy.search.reverse repeat
+        v copy.select select
+        space copy.select select
+        V copy.select.line hidden
+        y copy.yank copy
+        enter copy.yank copy
+        q copy.exit
+    }
+}

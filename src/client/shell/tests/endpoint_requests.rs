@@ -2,23 +2,19 @@ use super::*;
 use crate::client::endpoint::{ClientEndpointId, ClientEndpointStatus};
 
 fn pending_popup() -> (ClientShellState, Vec<ClientShellAction>) {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    let binding = crate::config::CustomCommandKeybind {
-        bindings: crate::config::ActionKeybinds::prefix("t"),
-        label: "prefix+t".into(),
-        command: "popup-command".into(),
-        action: crate::config::CustomCommandAction::Popup,
-        description: None,
-        width: None,
-        height: None,
-    };
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
+    let binding = command_leaf(
+        "ctrl+b t",
+        crate::input::keymap::CommandKind::Popup,
+        "popup-command",
+    );
     let mut projection = snapshot();
     projection
         .commands
         .push(crate::protocol::ClientShellCommand {
             command_id: "cmd_popup".into(),
-            binding_label: binding.label.clone(),
-            binding_labels: binding.bindings.labels(),
+            binding_label: binding.path_label.clone(),
+            binding_labels: vec![binding.path_label.clone()],
             action: crate::protocol::ClientShellCommandAction::Popup,
             description: None,
         });
@@ -31,7 +27,7 @@ fn pending_popup() -> (ClientShellState, Vec<ClientShellAction>) {
 }
 
 fn pending_worktree() -> (ClientShellState, Vec<ClientShellAction>) {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     submit_worktree(state)
@@ -122,7 +118,7 @@ fn worktree_create_leaves_server_focus_unchanged() {
 #[test]
 fn worktree_create_success_focuses_returned_tab_on_its_endpoint_after_snapshot_update() {
     for use_remote in [false, true] {
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        let mut state = ClientShellState::new(test_shell_config(&Config::default()));
         state.set_snapshot(Box::new(snapshot()));
         if use_remote {
             let remote = add_remote(&mut state);
@@ -372,7 +368,7 @@ fn stale_queued_request_is_cancelled_without_blocking_the_current_generation() {
 
 #[test]
 fn cancelled_integration_install_does_not_queue_a_refresh() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.open_settings_overlay();
     let Some(ClientShellOverlay::Settings(settings)) = state.overlay.as_mut() else {
@@ -402,7 +398,7 @@ fn cancelled_integration_install_does_not_queue_a_refresh() {
 
 #[test]
 fn failed_selection_copy_does_not_send_terminal_input() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.selection = Some(crate::selection::Selection::absolute_range(
@@ -435,7 +431,7 @@ fn failed_selection_copy_does_not_send_terminal_input() {
 
 #[test]
 fn cancelled_link_activation_does_not_replay_mouse_input() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.compose(100, 28).unwrap();

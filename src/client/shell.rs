@@ -21,6 +21,7 @@ mod global_menu;
 mod graphics;
 mod input;
 mod input_source;
+mod keymap_glue;
 mod link_hover;
 mod mobile;
 mod mouse;
@@ -56,8 +57,7 @@ use unicode_width::UnicodeWidthStr;
 use super::endpoint::{ClientEndpointId, ClientEndpointStatus, SavedSshEndpoint};
 use crate::app::state::Palette;
 use crate::config::{
-    Config, LiveKeybindConfig, SidebarCollapsedModeConfig, SpacesSidebarConfig,
-    TabBarPositionConfig,
+    Config, SidebarCollapsedModeConfig, SpacesSidebarConfig, TabBarPositionConfig,
 };
 use crate::protocol::{
     ClientMessage, ClientMousePosition, ClientPaneInputEvent, ClientShellSnapshot, ClientShellTab,

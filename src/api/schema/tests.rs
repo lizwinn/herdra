@@ -246,6 +246,18 @@ fn request_round_trips_for_server_reload_agent_manifests() {
 }
 
 #[test]
+fn request_round_trips_for_keymap_get() {
+    let request = Request {
+        id: "req_keymap".into(),
+        method: Method::KeymapGet(EmptyParams::default()),
+    };
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(json["method"], "keymap.get");
+    let decoded: Request = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, request);
+}
+
+#[test]
 fn request_round_trips_for_server_agent_manifests() {
     let request = Request {
         id: "req_agent_manifests".into(),
@@ -1031,6 +1043,7 @@ fn plugin_link_list_unlink_round_trip() {
             action: "bootstrap".into(),
             platforms: None,
         }],
+        keymap: None,
         source: Default::default(),
         warnings: vec![],
     };

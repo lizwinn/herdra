@@ -7,6 +7,90 @@ use crate::protocol::{
 use crossterm::event::MouseEvent;
 mod text_editing;
 
+pub(super) fn classic_keymap_file() -> crate::input::keymap::KeymapText {
+    crate::input::keymap::KeymapText {
+        source: "keymap.kdl".into(),
+        text: "base classic".into(),
+    }
+}
+
+/// Shell config for tests written against Herdr's classic one-key layout,
+/// unless the config already names a keymap.
+pub(super) fn test_shell_config(config: &Config) -> ClientShellConfig {
+    let mut shell = ClientShellConfig::from_config(config);
+    if shell.local_keymap_file.is_none() {
+        shell.local_keymap_file = Some(classic_keymap_file());
+        shell.rebuild_keymap();
+    }
+    shell
+}
+
+/// A command leaf as the client compiles it from keymap.kdl.
+pub(super) fn command_leaf(
+    path_label: &str,
+    kind: crate::input::keymap::CommandKind,
+    command: &str,
+) -> crate::input::keymap::CompiledCommand {
+    crate::input::keymap::CompiledCommand {
+        path_label: path_label.into(),
+        spec: crate::input::keymap::CommandSpec {
+            kind,
+            command: command.into(),
+            width: None,
+            height: None,
+        },
+        hint: command.into(),
+        owner: crate::input::keymap::LayerOwner::User,
+    }
+}
+
+/// A config whose keymap file has `text`.
+pub(super) fn config_with_keymap(text: &str) -> Config {
+    Config {
+        keymap_file: Some(crate::input::keymap::KeymapText {
+            source: "keymap.kdl".into(),
+            text: text.into(),
+        }),
+        ..Config::default()
+    }
+}
+
+impl ClientShellState {
+    /// Title of the menu that receives keys, or "terminal".
+    pub(super) fn mode_name(&self) -> &str {
+        self.top_menu()
+            .map_or("terminal", |menu| menu.title.as_str())
+    }
+
+    /// Open the menu with this title without running view hooks, the way
+    /// tests used to assign a mode.
+    pub(super) fn set_mode_name(&mut self, name: &str) {
+        let index = self
+            .config
+            .keymap
+            .menus
+            .iter()
+            .position(|menu| menu.title == name)
+            .unwrap_or_else(|| panic!("no menu titled {name}"));
+        self.mode = ClientShellMode::Menu(crate::input::keymap::MenuStack::single(
+            crate::input::keymap::MenuId(index as u16),
+        ));
+    }
+
+    /// Enter copy mode through the keymap's copy menu.
+    pub(super) fn enter_copy_mode(&mut self, outcome: &mut ClientShellInput) -> bool {
+        let Some(menu) = self
+            .config
+            .keymap
+            .menu_with_view(crate::input::keymap::ViewKind::Copy)
+        else {
+            return false;
+        };
+        self.set_menus(Some(crate::input::keymap::MenuStack::single(menu)), outcome);
+        self.copy_mode_focused()
+    }
+}
+
 pub(super) fn snapshot() -> ClientShellSnapshot {
     ClientShellSnapshot {
         boot_id: "boot-1".into(),

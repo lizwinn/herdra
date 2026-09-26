@@ -1,5 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use serde::Serialize;
 
 use crate::api::client::{ApiClient, ApiClientError};
@@ -26,6 +24,7 @@ mod agent;
 mod api;
 mod completion;
 mod integration;
+mod keymap;
 mod machine;
 mod notification;
 mod pane;
@@ -118,6 +117,7 @@ pub fn maybe_run(args: &[String]) -> std::io::Result<CommandOutcome> {
         "status" => status::run_status_command(&args[2..])?,
         "completion" | "completions" => completion::run_completion_command(&args[2..])?,
         "config" => run_config_command(&args[2..])?,
+        "keymap" => keymap::run_keymap_command(&args[2..])?,
         "channel" => run_channel_command(&args[2..])?,
         "machine" => machine::run_machine_command(&args[2..])?,
         "workspace" => workspace::run_workspace_command(&args[2..])?,
@@ -274,7 +274,6 @@ fn run_config_command(args: &[String]) -> std::io::Result<i32> {
 
     match subcommand {
         "check" => config_check(&args[1..]),
-        "reset-keys" => config_reset_keys(&args[1..]),
         "help" | "--help" | "-h" => {
             print_config_help();
             Ok(0)
@@ -310,95 +309,6 @@ fn config_check(args: &[String]) -> std::io::Result<i32> {
     }
 
     Ok(i32::from(!diagnostics.is_empty()))
-}
-
-fn config_reset_keys(args: &[String]) -> std::io::Result<i32> {
-    if !args.is_empty() {
-        eprintln!("usage: herdr config reset-keys");
-        return Ok(2);
-    }
-
-    let path = crate::config::config_path();
-    if !path.exists() {
-        println!(
-            "No config file found at {}. Built-in v2 keybindings already apply.",
-            path.display()
-        );
-        return Ok(0);
-    }
-
-    let content = std::fs::read_to_string(&path)?;
-    let parsed = match content.parse::<toml::Value>() {
-        Ok(value) => value,
-        Err(err) => {
-            eprintln!(
-                "config file at {} is invalid TOML: {err}. Fix it manually or move it aside to use defaults.",
-                path.display()
-            );
-            return Ok(1);
-        }
-    };
-    let Some(table) = parsed.as_table() else {
-        eprintln!(
-            "config file at {} is invalid TOML: top-level config must be a table.",
-            path.display()
-        );
-        return Ok(1);
-    };
-
-    if !table.contains_key("keys") {
-        println!(
-            "No [keys] config found in {}. Built-in v2 keybindings already apply.",
-            path.display()
-        );
-        return Ok(0);
-    }
-
-    let (updated, removed) = crate::config::remove_keybinding_config_sections(&content);
-    if !removed {
-        eprintln!(
-            "could not safely remove keybinding config from {} without rewriting comments; edit the file manually or remove the top-level keys setting.",
-            path.display()
-        );
-        return Ok(1);
-    }
-    if let Err(err) = updated.parse::<toml::Value>() {
-        eprintln!(
-            "removing keybinding config would make {} invalid TOML: {err}; leaving config unchanged",
-            path.display()
-        );
-        return Ok(1);
-    }
-
-    let backup_path = key_config_backup_path(&path);
-    std::fs::copy(&path, &backup_path)?;
-    std::fs::write(&path, updated)?;
-
-    println!("Created backup: {}", backup_path.display());
-    println!(
-        "Removed [keys], [keys.indexed], and [[keys.command]] from {}.",
-        path.display()
-    );
-    println!("Built-in v2 keybindings will apply after Herdr restarts or reloads config.");
-    println!("If a Herdr server is running, run `herdr server reload-config` to apply this now.");
-    println!(
-        "To restore: cp {} {}",
-        backup_path.display(),
-        path.display()
-    );
-    Ok(0)
-}
-
-fn key_config_backup_path(path: &std::path::Path) -> std::path::PathBuf {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("config.toml");
-    path.with_file_name(format!("{file_name}.bak-keybind-v2-{timestamp}"))
 }
 
 fn run_terminal_command(args: &[String]) -> std::io::Result<i32> {
@@ -1024,8 +934,7 @@ fn print_session_error(code: &str, message: &str) {
 
 fn print_config_help() {
     eprintln!("herdr config commands:");
-    eprintln!("  herdr config check  validate config.toml and print diagnostics");
-    eprintln!("  herdr config reset-keys  back up config.toml and remove custom keybindings");
+    eprintln!("  herdr config check  validate config.toml and keymap.kdl and print diagnostics");
 }
 
 fn print_terminal_help() {

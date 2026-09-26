@@ -44,7 +44,7 @@ fn preview_key(state: &mut ClientShellState, bytes: &[u8]) {
 fn enter_navigation(state: &mut ClientShellState) {
     preview_key(state, &[0x02]);
     preview_key(state, b"w");
-    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.mode_name(), "navigate");
 }
 
 fn assert_selected(state: &ClientShellState, endpoint: &ClientEndpointId, workspace: &str) {
@@ -77,7 +77,7 @@ fn local_navigation_highlight_stays_visible_with_terminal_theme() {
 
     for compact in [false, true] {
         for selection_bg in [Color::Reset, Color::Rgb(70, 63, 93)] {
-            let mut config = ClientShellConfig::from_config(&Config::default());
+            let mut config = test_shell_config(&Config::default());
             config.palette = Palette::terminal();
             config.palette.selection_bg = selection_bg;
             let expected_bg = if selection_bg == Color::Reset {
@@ -246,7 +246,7 @@ fn foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context() {
         ] {
             preview_key(&mut state, key);
             assert!(state.overlay.is_none());
-            assert_eq!(state.mode, ClientShellMode::Navigate);
+            assert_eq!(state.mode_name(), "navigate");
         }
     }
     assert_selected(&state, &remote, "ws_1");
@@ -470,7 +470,7 @@ fn foreign_preview_survives_local_updates_and_rejects_stale_enter() {
         }
         preview_key(&mut state, b"\r");
         assert_eq!(state.active_endpoint_id, ClientEndpointId::Local);
-        assert_eq!(state.mode, ClientShellMode::Navigate);
+        assert_eq!(state.mode_name(), "navigate");
         assert!(state.visible_endpoint_notice.is_some());
         assert!(!state.navigation_target_valid(state.navigate_workspace_id.as_ref().unwrap()));
         preview_key(&mut state, b"\x1b[B");
@@ -534,7 +534,7 @@ fn active_preview_is_not_retargeted_by_deletion_or_reboot() {
         );
         assert_eq!(state.navigate_workspace_id, selected);
         preview_key(&mut state, b"\r");
-        assert_eq!(state.mode, ClientShellMode::Navigate);
+        assert_eq!(state.mode_name(), "navigate");
         assert!(state.visible_endpoint_notice.is_some());
         for confirm in [false, true] {
             state.config.confirm_close = confirm;
@@ -542,7 +542,7 @@ fn active_preview_is_not_retargeted_by_deletion_or_reboot() {
                 preview_key(&mut state, key);
             }
             assert!(state.overlay.is_none());
-            assert_eq!(state.mode, ClientShellMode::Navigate);
+            assert_eq!(state.mode_name(), "navigate");
         }
         assert_eq!(state.workspace_action_id().as_deref(), Some("ws_1"));
     }
@@ -586,7 +586,7 @@ fn aggregate_navigation_reveals_overflow_and_preserves_order() {
 }
 
 fn local_navigation_state(compact: bool) -> ClientShellState {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.config.palette = Palette::terminal();
     state.sidebar_collapsed = compact;
     state.set_snapshot(Box::new(workspaces(3)));
@@ -868,14 +868,13 @@ fn directional_pane_focus_releases_an_accepted_workspace_highlight() {
 
 #[test]
 fn direct_agent_focus_repaints_when_releasing_a_workspace_highlight() {
-    let mut config = Config::default();
-    config.keys.focus_agent = crate::config::BindingConfig::one("ctrl+alt+1");
+    let config = config_with_keymap("base classic\nctrl+alt+1 agent.focus");
     let mut projected = workspaces(3);
     projected.agents.push(agent("agent", AgentStatus::Idle, 1));
 
     for pending in [false, true] {
         let mut state = local_navigation_state(false);
-        state.config.keybinds = ClientShellConfig::from_config(&config).keybinds;
+        state.config.keymap = test_shell_config(&config).keymap;
         state.set_snapshot(Box::new(projected.clone()));
         state.compose(100, 28).unwrap();
         if pending {
@@ -906,7 +905,7 @@ fn cancelled_close_does_not_restore_an_older_navigation_highlight() {
     request_local_navigation(&mut state, 2);
     state.open_confirm_close_overlay("ws_1".into());
     preview_key(&mut state, b"\x1b");
-    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.mode_name(), "navigate");
     preview_key(&mut state, b"\x1b");
     assert_eq!(state.mode, ClientShellMode::Terminal);
     assert_local_highlight(&mut state, "ws_1");

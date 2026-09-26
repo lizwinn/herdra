@@ -191,6 +191,7 @@ mod tests {
             events: vec![],
             panes: vec![],
             link_handlers: vec![],
+            keymap: None,
             source: Default::default(),
             warnings: vec![],
         }
@@ -278,6 +279,7 @@ mod tests {
                 events: vec![],
                 panes: vec![],
                 link_handlers: vec![],
+                keymap: None,
                 source: Default::default(),
                 warnings: vec![],
             })

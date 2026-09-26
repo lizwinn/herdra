@@ -12,7 +12,6 @@ pub(crate) mod clipboard_image;
 #[cfg(unix)]
 pub(crate) mod handoff;
 pub mod headless;
-pub(crate) mod keybindings;
 pub(crate) mod notifications;
 pub(crate) mod pane_input;
 #[cfg(test)]

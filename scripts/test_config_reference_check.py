@@ -246,9 +246,9 @@ class RealModelTests(unittest.TestCase):
         keys = collect_keys(model)
 
         self.assertGreater(len(keys), 100)
-        self.assertIn("keys.prefix", keys)
+        self.assertIn("keymap.path", keys)
         self.assertIn("ui.sound.agents.claude", keys)
-        self.assertNotIn("keys.command", keys)
+        self.assertNotIn("keys.prefix", keys)
 
     def test_preview_reference_matches_real_config_model(self) -> None:
         self.assertEqual(

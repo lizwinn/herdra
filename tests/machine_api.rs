@@ -560,7 +560,7 @@ fn machine_api_usage_errors_do_not_connect() {
     let harness = Harness::new();
     for args in [
         vec!["--machine", "missing", "agent", "list"],
-        vec!["--machine", "mac", "config", "reset-keys"],
+        vec!["--machine", "mac", "keymap", "reset"],
         vec![
             "--machine",
             "mac",

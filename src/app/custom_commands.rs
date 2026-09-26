@@ -27,20 +27,22 @@ pub(super) struct EndpointCommandRegistry {
 #[derive(Debug)]
 struct EndpointCommand {
     id: String,
-    binding: crate::config::CustomCommandKeybind,
+    command: crate::input::keymap::CompiledCommand,
     action: crate::protocol::ClientShellCommandAction,
 }
 
 impl EndpointCommandRegistry {
-    pub(super) fn new(bindings: &[crate::config::CustomCommandKeybind]) -> Self {
+    /// Mint opaque ids for every command leaf in the server's keymap. Clients
+    /// find a command's id by the chord path that reaches it.
+    pub(super) fn new(commands: &[crate::input::keymap::CompiledCommand]) -> Self {
         let namespace = new_command_namespace();
-        let entries = bindings
+        let entries = commands
             .iter()
             .enumerate()
-            .map(|(index, binding)| EndpointCommand {
-                action: binding.action.into(),
+            .map(|(index, command)| EndpointCommand {
+                action: command.spec.kind.into(),
                 id: format!("cmd_{namespace}_{index}"),
-                binding: binding.clone(),
+                command: command.clone(),
             })
             .collect();
         Self { entries }
@@ -48,20 +50,16 @@ impl EndpointCommandRegistry {
 }
 
 impl App {
-    pub(crate) fn client_shell_keybindings_profile(&self) -> Option<&str> {
-        self.client_shell_keybindings_profile.as_deref()
-    }
-
     pub(crate) fn client_shell_command_manifest(&self) -> Vec<crate::protocol::ClientShellCommand> {
         self.endpoint_commands
             .entries
             .iter()
             .map(|entry| crate::protocol::ClientShellCommand {
                 command_id: entry.id.clone(),
-                binding_label: entry.binding.label.clone(),
-                binding_labels: entry.binding.bindings.labels(),
+                binding_label: entry.command.path_label.clone(),
+                binding_labels: vec![entry.command.path_label.clone()],
                 action: entry.action,
-                description: entry.binding.description.clone(),
+                description: Some(entry.command.hint.clone()),
             })
             .collect()
     }
@@ -69,12 +67,12 @@ impl App {
     pub(crate) fn resolve_client_shell_command(
         &self,
         id: &str,
-    ) -> Option<crate::config::CustomCommandKeybind> {
+    ) -> Option<crate::input::keymap::CompiledCommand> {
         self.endpoint_commands
             .entries
             .iter()
             .find(|entry| entry.id == id)
-            .map(|entry| entry.binding.clone())
+            .map(|entry| entry.command.clone())
     }
 
     pub(crate) fn handle_command_invoke(
@@ -92,7 +90,7 @@ impl App {
         if let Err((code, message)) = self.focus_client_shell_command_target(&params) {
             return crate::app::api::responses::encode_error(id, code, message);
         }
-        let selected_text = if binding.action == crate::config::CustomCommandAction::PluginAction {
+        let selected_text = if binding.spec.kind == crate::input::keymap::CommandKind::Plugin {
             let Some(selection) = params.selection.as_ref() else {
                 return self.execute_custom_command_response(id, &binding, None);
             };
@@ -118,7 +116,7 @@ impl App {
     fn execute_custom_command_response(
         &mut self,
         id: String,
-        binding: &crate::config::CustomCommandKeybind,
+        binding: &crate::input::keymap::CompiledCommand,
         selected_text: Option<String>,
     ) -> String {
         match self.execute_custom_command_binding(binding, selected_text) {
@@ -211,32 +209,33 @@ impl App {
     }
     pub(crate) fn execute_custom_command_binding(
         &mut self,
-        binding: &crate::config::CustomCommandKeybind,
+        binding: &crate::input::keymap::CompiledCommand,
         selected_text: Option<String>,
     ) -> io::Result<()> {
-        match binding.action {
-            crate::config::CustomCommandAction::Shell => self.spawn_custom_command(binding),
-            crate::config::CustomCommandAction::Pane => {
-                self.spawn_pane_command(&binding.command, Vec::new())
+        let spec = &binding.spec;
+        match spec.kind {
+            crate::input::keymap::CommandKind::Shell => self.spawn_custom_command(&spec.command),
+            crate::input::keymap::CommandKind::Pane => {
+                self.spawn_pane_command(&spec.command, Vec::new())
             }
-            crate::config::CustomCommandAction::Popup => self.spawn_custom_popup_command(binding),
-            crate::config::CustomCommandAction::PluginAction => self
-                .invoke_plugin_action_from_keybind(binding.command.clone(), selected_text)
+            crate::input::keymap::CommandKind::Popup => self.spawn_custom_popup_command(spec),
+            crate::input::keymap::CommandKind::Plugin => self
+                .invoke_plugin_action_from_keybind(spec.command.clone(), selected_text)
                 .map_err(io::Error::other),
         }
     }
 
     fn spawn_custom_popup_command(
         &mut self,
-        binding: &crate::config::CustomCommandKeybind,
+        spec: &crate::input::keymap::CommandSpec,
     ) -> io::Result<()> {
         self.spawn_popup_shell_command(
-            &binding.command,
+            &spec.command,
             None,
             self.custom_command_env().0,
             crate::app::popup::PopupGeometry {
-                width: binding.width,
-                height: binding.height,
+                width: spec.width,
+                height: spec.height,
             },
         )
     }
@@ -285,11 +284,8 @@ impl App {
         (env, cwd)
     }
 
-    fn spawn_custom_command(
-        &mut self,
-        binding: &crate::config::CustomCommandKeybind,
-    ) -> std::io::Result<()> {
-        let mut command = crate::platform::detached_custom_command_process(&binding.command);
+    fn spawn_custom_command(&mut self, command_text: &str) -> std::io::Result<()> {
+        let mut command = crate::platform::detached_custom_command_process(command_text);
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -581,35 +577,39 @@ mod tests {
         )
     }
 
-    fn binding(action: crate::config::CustomCommandAction) -> crate::config::CustomCommandKeybind {
-        crate::config::CustomCommandKeybind {
-            bindings: crate::config::ActionKeybinds::prefix("z"),
-            label: "prefix+z".into(),
-            command: "secret-command --token hidden".into(),
-            action,
-            description: Some("safe description".into()),
-            width: None,
-            height: None,
+    use crate::input::keymap::{CommandKind, CommandSpec, CompiledCommand};
+
+    fn binding(kind: CommandKind) -> CompiledCommand {
+        CompiledCommand {
+            path_label: "ctrl+b z".into(),
+            spec: CommandSpec {
+                kind,
+                command: "secret-command --token hidden".into(),
+                width: None,
+                height: None,
+            },
+            hint: "safe description".into(),
+            owner: crate::input::keymap::LayerOwner::User,
         }
     }
 
-    fn install(app: &mut crate::app::App, binding: crate::config::CustomCommandKeybind) {
+    fn install(app: &mut crate::app::App, binding: CompiledCommand) {
         app.endpoint_commands = super::EndpointCommandRegistry::new(&[binding]);
     }
 
     #[test]
     fn manifest_exposes_opaque_ids_without_command_text() {
         let mut app = test_app();
-        install(&mut app, binding(crate::config::CustomCommandAction::Shell));
+        install(&mut app, binding(CommandKind::Shell));
         let manifest = app.client_shell_command_manifest();
         assert_eq!(manifest.len(), 1);
-        assert_eq!(manifest[0].binding_label, "prefix+z");
-        assert_eq!(manifest[0].binding_labels, ["prefix+z"]);
+        assert_eq!(manifest[0].binding_label, "ctrl+b z");
+        assert_eq!(manifest[0].binding_labels, ["ctrl+b z"]);
         assert_eq!(manifest[0].description.as_deref(), Some("safe description"));
         assert!(!format!("{:?}", manifest).contains("secret-command"));
         assert_eq!(
             app.resolve_client_shell_command(&manifest[0].command_id)
-                .map(|binding| binding.command),
+                .map(|binding| binding.spec.command),
             Some("secret-command --token hidden".into())
         );
     }
@@ -617,10 +617,10 @@ mod tests {
     #[test]
     fn stale_command_id_is_rejected_after_definition_changes() {
         let mut app = test_app();
-        install(&mut app, binding(crate::config::CustomCommandAction::Shell));
+        install(&mut app, binding(CommandKind::Shell));
         let old_id = app.client_shell_command_manifest()[0].command_id.clone();
-        let mut replacement = binding(crate::config::CustomCommandAction::Shell);
-        replacement.command = "replacement-command".into();
+        let mut replacement = binding(CommandKind::Shell);
+        replacement.spec.command = "replacement-command".into();
         install(&mut app, replacement);
 
         let response = app.handle_command_invoke(
@@ -638,35 +638,16 @@ mod tests {
     }
 
     #[test]
-    fn foreground_keybinding_projection_cannot_remap_command_ids() {
-        let mut app = test_app();
-        install(&mut app, binding(crate::config::CustomCommandAction::Shell));
-        let command_id = app.client_shell_command_manifest()[0].command_id.clone();
-        let mut foreground_binding = binding(crate::config::CustomCommandAction::Shell);
-        foreground_binding.command = "different-foreground-command".into();
-        app.state.keybinds.custom_commands = vec![foreground_binding];
-
-        assert_eq!(
-            app.resolve_client_shell_command(&command_id)
-                .map(|binding| binding.command),
-            Some("secret-command --token hidden".into())
-        );
-    }
-
-    #[test]
     fn command_ids_do_not_alias_across_endpoint_restarts() {
         let mut old_app = test_app();
-        install(
-            &mut old_app,
-            binding(crate::config::CustomCommandAction::Shell),
-        );
+        install(&mut old_app, binding(CommandKind::Shell));
         let old_id = old_app.client_shell_command_manifest()[0]
             .command_id
             .clone();
 
         let mut replacement_app = test_app();
-        let mut replacement = binding(crate::config::CustomCommandAction::Shell);
-        replacement.command = "replacement-command".into();
+        let mut replacement = binding(CommandKind::Shell);
+        replacement.spec.command = "replacement-command".into();
         install(&mut replacement_app, replacement);
         assert_ne!(
             replacement_app.client_shell_command_manifest()[0].command_id,
@@ -700,8 +681,8 @@ mod tests {
             terminal_id,
             crate::terminal::TerminalRuntime::test_with_screen_bytes(80, 24, b"selected text\n"),
         );
-        let mut plugin = binding(crate::config::CustomCommandAction::PluginAction);
-        plugin.command = "missing.plugin-action".into();
+        let mut plugin = binding(CommandKind::Plugin);
+        plugin.spec.command = "missing.plugin-action".into();
         install(&mut app, plugin);
         let command_id = app.client_shell_command_manifest()[0].command_id.clone();
         let workspace_id = app.public_workspace_id(0);
@@ -741,8 +722,8 @@ mod tests {
                 .as_nanos()
         ));
         let _ = std::fs::remove_file(&path);
-        let mut command = binding(crate::config::CustomCommandAction::Shell);
-        command.command = format!("printf invoked > {}", path.display());
+        let mut command = binding(CommandKind::Shell);
+        command.spec.command = format!("printf invoked > {}", path.display());
         install(&mut app, command);
         let command_id = app.client_shell_command_manifest()[0].command_id.clone();
 
@@ -769,7 +750,7 @@ mod tests {
     #[test]
     fn popup_commands_are_advertised_without_exposing_the_command_text() {
         let mut app = test_app();
-        install(&mut app, binding(crate::config::CustomCommandAction::Popup));
+        install(&mut app, binding(CommandKind::Popup));
 
         let manifest = app.client_shell_command_manifest();
         assert_eq!(manifest.len(), 1);

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn host_appearance_prefers_explicit_reports_over_background_inference() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.config.theme_runtime.auto_switch = true;
 
     let light = crate::app::client_palette_for_appearance(
@@ -80,7 +80,7 @@ fn host_appearance_prefers_explicit_reports_over_background_inference() {
 fn full_host_palette_response_is_sent_as_one_theme_update() {
     use std::fmt::Write as _;
 
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut responses = String::new();
     for index in 0..=u8::MAX {
         let _ = write!(responses, "\x1b]4;{index};rgb:1111/2222/3333\x1b\\");
@@ -148,7 +148,7 @@ fn modal_paste_shortcut_modifiers_are_platform_specific() {
 
 #[test]
 fn modal_paste_inserts_clipboard_text_through_overlay_text_path() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
         title: "rename pane",
         input: TextEditor::new("replace me", true),
@@ -174,7 +174,7 @@ fn modal_paste_inserts_clipboard_text_through_overlay_text_path() {
 
 #[test]
 fn client_shell_graphics_follow_final_shell_origin_and_local_overlay_visibility() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     let mut pane_surface = surface();
     let key = crate::protocol::SurfaceGraphicsAssetKey {
@@ -240,7 +240,7 @@ fn client_shell_graphics_follow_final_shell_origin_and_local_overlay_visibility(
 
 #[test]
 fn delayed_link_fallback_does_not_replay_against_changed_geometry() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("pane frame");
@@ -273,7 +273,7 @@ fn delayed_link_fallback_does_not_replay_against_changed_geometry() {
 
 #[test]
 fn invalid_experimental_reload_keeps_input_source_preference() {
-    let mut shell = ClientShellConfig::from_config(&Config::default());
+    let mut shell = test_shell_config(&Config::default());
     shell.switch_ascii_input_source_in_prefix = true;
     let config = Config::default();
     shell.apply_live_config(&config, &[], &["experimental".to_owned()]);
@@ -284,7 +284,7 @@ fn invalid_experimental_reload_keeps_input_source_preference() {
 
 #[test]
 fn physical_release_uses_the_leased_press_code_with_current_modifiers() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     let press = crate::input::TerminalKey::new(KeyCode::Char('x'), KeyModifiers::empty())
@@ -328,7 +328,7 @@ fn physical_release_uses_the_leased_press_code_with_current_modifiers() {
 
 #[test]
 fn highlighted_search_match_copies_after_in_flight_repeat() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     let mut pane_surface = surface();
     pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
@@ -339,10 +339,7 @@ fn highlighted_search_match_copies_after_in_flight_repeat() {
     state.set_pane_surface(pane_surface);
     state.compose(106, 20).expect("composed frame");
     let mut enter = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::CopyMode),
-        &mut enter,
-    );
+    state.enter_copy_mode(&mut enter);
     let matches = vec![
         crate::api::schema::PaneTextRange {
             start: crate::api::schema::PaneTextPoint { row: 5, col: 2 },
@@ -385,7 +382,7 @@ fn highlighted_search_match_copies_after_in_flight_repeat() {
         crate::input::TerminalKey::new(KeyCode::Char('y'), KeyModifiers::empty()),
     )]);
     assert!(early_copy.actions.is_empty());
-    assert_eq!(state.mode, ClientShellMode::Copy);
+    assert_eq!(state.mode_name(), "copy");
 
     let (_, actions) = state.handle_endpoint_result(
         "boot-1",
@@ -423,7 +420,7 @@ fn highlighted_search_match_copies_after_in_flight_repeat() {
 
 #[test]
 fn pixel_host_reports_use_cells_without_target_pixel_mode_and_release_outside() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     let mut pane_surface = surface();
     pane_surface.panes[0].mouse_reporting = true;
@@ -470,7 +467,7 @@ fn pixel_host_reports_use_cells_without_target_pixel_mode_and_release_outside() 
 
 #[test]
 fn shell_targets_unconsumed_input_and_keeps_prefix_local() {
-    let config = ClientShellConfig::from_config(&Config::default());
+    let config = test_shell_config(&Config::default());
     let mut state = ClientShellState::new(config);
     state.set_snapshot(Box::new(snapshot()));
 
@@ -525,7 +522,7 @@ fn shell_targets_unconsumed_input_and_keeps_prefix_local() {
 
 #[test]
 fn pane_key_release_keeps_the_press_target() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
 
     let press = state.handle_input_bytes(b"\x1b[99;5u");
@@ -556,7 +553,7 @@ fn pane_key_release_keeps_the_press_target() {
 
 #[test]
 fn help_overlay_uses_live_keymap_and_owns_filter_state() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     let mut open = ClientShellInput::default();
@@ -576,7 +573,7 @@ fn help_overlay_uses_live_keymap_and_owns_filter_state() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(text.contains("keybinds"));
-    assert!(text.contains("prefix mode"));
+    assert!(text.contains("+prefix"));
 
     assert!(state.handle_input_bytes(b"/").actions.is_empty());
     assert!(state.handle_input_bytes(b"workspace").actions.is_empty());
@@ -591,8 +588,8 @@ fn help_overlay_uses_live_keymap_and_owns_filter_state() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("workspace navigation"));
-    assert!(!text.contains("prefix mode"));
+    assert!(text.contains("new workspace"));
+    assert!(!text.contains("+prefix"));
     assert!(filtered
         .cursor
         .as_ref()
@@ -608,7 +605,7 @@ fn help_overlay_uses_live_keymap_and_owns_filter_state() {
 fn rename_pane_empty_value_is_preserved_as_a_clear_request() {
     let mut snapshot = snapshot();
     snapshot.panes[0].label = Some("build".into());
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot));
     let mut open = ClientShellInput::default();
     state.record_binding(
@@ -629,7 +626,7 @@ fn rename_pane_empty_value_is_preserved_as_a_clear_request() {
 
 #[test]
 fn styled_client_composition_preserves_pane_hyperlinks() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     let mut pane_surface = surface();
     let linked = Buffer::with_lines(["LIVE", "PANE"]);

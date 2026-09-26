@@ -954,17 +954,15 @@ impl ClientShellState {
         }
         use crossterm::event::{MouseButton, MouseEventKind};
         let point = (mouse.column, mouse.row);
-        if self.mode != ClientShellMode::Navigate {
-            if matches!(
-                self.mode,
-                ClientShellMode::Terminal | ClientShellMode::Resize
-            ) && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+        if !self.workspace_list_active() {
+            if !self.copy_mode_focused()
+                && mouse.kind == MouseEventKind::Down(MouseButton::Left)
                 && super::contains(self.hits.mobile_switch, point)
             {
                 self.mobile_switcher_scroll = 0;
                 self.reveal_mobile_workspace = false;
                 self.pending_workspace_highlight = None;
-                self.mode = ClientShellMode::Navigate;
+                self.mode = self.workspace_list_mode();
                 self.navigate_workspace_id = self.focused_navigation_target();
                 outcome.repaint = true;
                 return true;

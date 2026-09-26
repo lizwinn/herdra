@@ -35,14 +35,14 @@ impl ClientShellState {
         } else {
             Rect::new(0, 1, cols, rows.saturating_sub(2))
         };
-        let valid_navigation_target = self.mode == ClientShellMode::Navigate
+        let valid_navigation_target = self.workspace_list_active()
             && self
                 .navigate_workspace_id
                 .as_ref()
                 .is_some_and(|target| self.navigation_target_valid(target));
         let pending_workspace_highlight =
             self.pending_workspace_highlight.as_ref().filter(|pending| {
-                self.mode != ClientShellMode::Navigate
+                !self.workspace_list_active()
                     && pending.target.endpoint_id == self.active_endpoint_id
                     && self.navigation_target_valid(&pending.target)
             });
@@ -128,11 +128,13 @@ impl ClientShellState {
         render::render_mode_bar(
             &mut buffer,
             Rect::new(0, 0, cols, rows),
-            self.mode,
-            None,
-            self.endpoint_error.as_deref(),
-            false,
-            &self.config.keybinds,
+            render::ModeBar {
+                menu: self.top_menu(),
+                copy_mode: None,
+                endpoint_error: self.endpoint_error.as_deref(),
+                update_available: false,
+                default_bar: self.config.mode_hint_bar,
+            },
             &self.config.palette,
         );
         if let Some(notice) = &self.visible_endpoint_notice {
@@ -154,19 +156,19 @@ impl ClientShellState {
     ) -> Option<crate::client::frame_output::ComposedFrame> {
         self.last_composed_at = Some(std::time::Instant::now());
         self.selection_repaint_deadline = None;
-        if self.last_composed_size != Some((cols, rows)) && self.mode == ClientShellMode::Navigate {
+        if self.last_composed_size != Some((cols, rows)) && self.workspace_list_active() {
             self.reveal_navigation_workspace = true;
             self.reveal_mobile_workspace = true;
         }
         self.last_composed_size = Some((cols, rows));
-        let valid_navigation_target = self.mode == ClientShellMode::Navigate
+        let valid_navigation_target = self.workspace_list_active()
             && self
                 .navigate_workspace_id
                 .as_ref()
                 .is_some_and(|target| self.navigation_target_valid(target));
         let pending_workspace_highlight =
             self.pending_workspace_highlight.as_ref().filter(|pending| {
-                self.mode != ClientShellMode::Navigate
+                !self.workspace_list_active()
                     && pending.target.endpoint_id == self.active_endpoint_id
                     && self.navigation_target_valid(&pending.target)
             });
@@ -316,7 +318,7 @@ impl ClientShellState {
             layout.pane_surface
         };
         let mobile_navigate_panel = !layout.mobile_header.is_empty()
-            && self.mode == ClientShellMode::Navigate
+            && self.workspace_list_active()
             && self.endpoint_error.is_none();
         let mode_bar = if mobile_navigate_panel || self.overlay.is_some() {
             None
@@ -324,11 +326,14 @@ impl ClientShellState {
             render::render_mode_bar(
                 &mut buffer,
                 mode_bar_area,
-                self.mode,
-                self.copy_mode.as_ref(),
-                self.endpoint_error.as_deref(),
-                snapshot.update_available.is_some(),
-                &self.config.keybinds,
+                render::ModeBar {
+                    menu: self.top_menu(),
+                    copy_mode: self.copy_mode.as_ref(),
+                    endpoint_error: self.endpoint_error.as_deref(),
+                    update_available: snapshot.update_available.is_some()
+                        && self.workspace_list_active(),
+                    default_bar: self.config.mode_hint_bar,
+                },
                 &self.config.palette,
             )
         };
@@ -413,7 +418,7 @@ impl ClientShellState {
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
         self.render_link_hover(&mut frame, &mut occlusion);
-        if self.mode == ClientShellMode::Copy {
+        if self.copy_mode_focused() {
             frame.cursor = None;
             if let Some(copy_mode) = self.copy_mode.as_ref() {
                 if let Some(hit) = self.hits.panes.iter().find(|hit| {
@@ -595,7 +600,7 @@ impl ClientShellState {
             }
         }
         if !layout.mobile_header.is_empty()
-            && self.mode == ClientShellMode::Navigate
+            && self.workspace_list_active()
             && self.overlay.is_none()
         {
             let mut composed = frame.to_ratatui_buffer()?;
@@ -668,7 +673,7 @@ impl ClientShellState {
                     snapshot,
                     &self.endpoints,
                     &self.active_endpoint_id,
-                    &self.config.keybinds,
+                    &self.config.keymap,
                     &self.config.palette,
                 )?;
                 occlusion.cover(rendered.area);

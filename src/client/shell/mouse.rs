@@ -654,7 +654,7 @@ impl ClientShellState {
     pub(super) fn handle_mouse(&mut self, mouse: MouseEvent, outcome: &mut ClientShellInput) {
         self.update_link_hover(mouse, outcome);
         let point = (mouse.column, mouse.row);
-        if self.mode == ClientShellMode::Navigate
+        if self.workspace_list_active()
             && self.workspace_preview_action_blocked()
             && self.overlay.is_none()
             && !self.mobile_layout_active()

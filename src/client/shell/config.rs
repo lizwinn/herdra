@@ -68,7 +68,19 @@ impl ClientShellState {
         }
     }
 
+    /// Menu ids belong to one compiled keymap; after a rebuild, close menus
+    /// and return to copy mode or the terminal.
+    pub(super) fn reset_menus_for_new_keymap(&mut self) {
+        if self.mode != ClientShellMode::Terminal {
+            self.mode = self.copy_or_terminal_mode();
+            if !self.workspace_list_active() {
+                self.navigate_workspace_id = None;
+            }
+        }
+    }
+
     pub(crate) fn reload_client_config(&mut self) {
+        let previous_keymap = std::sync::Arc::clone(&self.config.keymap);
         match crate::config::load_live_config() {
             Ok(loaded) => {
                 let agent_panel_sort = self.config.agent_panel_sort;
@@ -90,15 +102,8 @@ impl ClientShellState {
                     self.config.agent_panel_sort = agent_panel_sort;
                 }
                 self.set_local_config_diagnostic(self.config.local_config_diagnostic(&diagnostics));
-                if let Some(snapshot) = self.snapshot.as_deref() {
-                    let profile = snapshot.server_keybindings_toml.clone();
-                    let commands = snapshot.commands.clone();
-                    if let Err(err) = self
-                        .config
-                        .apply_snapshot_keybindings(profile.as_deref(), &commands)
-                    {
-                        self.set_endpoint_error(err);
-                    }
+                if !std::sync::Arc::ptr_eq(&previous_keymap, &self.config.keymap) {
+                    self.reset_menus_for_new_keymap();
                 }
             }
             Err(diagnostics) => {
@@ -118,6 +123,7 @@ impl ClientShellConfig {
             sidebar_max_width: config.ui.sidebar_max_width,
             sidebar_start_collapsed: config.ui.sidebar_start_collapsed,
             sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
+            mode_hint_bar: config.ui.mode_hint_bar.into(),
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
@@ -135,14 +141,10 @@ impl ClientShellConfig {
             theme_name: theme_runtime.manual_name.clone(),
             theme_runtime,
             palette: crate::app::client_palette_from_config(config),
-            keybinds: config
-                .live_keybinds_with_diagnostics()
-                .map(|(keybinds, _diagnostics)| keybinds)
-                .unwrap_or_else(|_diagnostics| LiveKeybindConfig {
-                    prefix: config.prefix_key(),
-                    keybinds: config.keybinds(),
-                }),
-            local_keys: config.keys.clone(),
+            keymap: std::sync::Arc::new(config.keymap()),
+            local_keymap_file: config.keymap_file.clone(),
+            plugin_keymaps: Vec::new(),
+            server_keymap: None,
             keybinding_source: ClientShellKeybindingSource::Local,
             prompt_new_tab_name: config.ui.prompt_new_tab_name,
             prompt_new_workspace_name: config.ui.prompt_new_workspace_name,
@@ -174,8 +176,35 @@ impl ClientShellConfig {
 
     pub(crate) fn with_keybinding_source(mut self, source: ClientShellKeybindingSource) -> Self {
         self.keybinding_source = source;
-        self.keybinds.keybinds.custom_commands.clear();
         self
+    }
+
+    /// Recompile the keymap: the local keymap file, or the server's with
+    /// `--remote-keybindings server`, plus the active server's plugin trees.
+    pub(super) fn rebuild_keymap(&mut self) {
+        let user = match (&self.keybinding_source, &self.server_keymap) {
+            (ClientShellKeybindingSource::Endpoint, Some(server_keymap)) => server_keymap.as_ref(),
+            _ => self.local_keymap_file.as_ref(),
+        };
+        self.keymap = std::sync::Arc::new(crate::input::keymap::CompiledKeymap::build(
+            user,
+            &self.plugin_keymaps,
+        ));
+    }
+
+    /// Replace the server-provided layers. Returns whether the keymap changed.
+    pub(super) fn set_keymap_layers(
+        &mut self,
+        plugins: Vec<(String, crate::input::keymap::KeymapText)>,
+        server_keymap: Option<Option<crate::input::keymap::KeymapText>>,
+    ) -> bool {
+        if plugins == self.plugin_keymaps && server_keymap == self.server_keymap {
+            return false;
+        }
+        self.plugin_keymaps = plugins;
+        self.server_keymap = server_keymap;
+        self.rebuild_keymap();
+        true
     }
 
     pub(crate) fn uses_endpoint_keybindings(&self) -> bool {
@@ -200,86 +229,6 @@ impl ClientShellConfig {
         self
     }
 
-    pub(super) fn apply_snapshot_keybindings(
-        &mut self,
-        profile: Option<&str>,
-        commands: &[crate::protocol::ClientShellCommand],
-    ) -> Result<(), String> {
-        let mut keybinds = match self.keybinding_source {
-            ClientShellKeybindingSource::Endpoint => crate::config::keybindings_from_profile_toml(
-                profile.ok_or("endpoint did not publish its keybindings")?,
-            )?,
-            ClientShellKeybindingSource::RemoteLocal => return Ok(()),
-            ClientShellKeybindingSource::Local => {
-                let mut config = crate::config::Config {
-                    keys: self.local_keys.clone(),
-                    ..Default::default()
-                };
-                config.keys.command = commands
-                    .iter()
-                    .filter_map(|command| {
-                        let action_type = match command.action {
-                            crate::protocol::ClientShellCommandAction::Shell => {
-                                crate::config::CommandKeybindType::Shell
-                            }
-                            crate::protocol::ClientShellCommandAction::Pane => {
-                                crate::config::CommandKeybindType::Pane
-                            }
-                            crate::protocol::ClientShellCommandAction::Popup => {
-                                crate::config::CommandKeybindType::Popup
-                            }
-                            crate::protocol::ClientShellCommandAction::PluginAction => {
-                                crate::config::CommandKeybindType::PluginAction
-                            }
-                            crate::protocol::ClientShellCommandAction::Unknown => return None,
-                        };
-                        Some(crate::config::CommandKeybindConfig {
-                            key: if command.binding_labels.len() == 1 {
-                                crate::config::BindingConfig::One(command.binding_labels[0].clone())
-                            } else {
-                                crate::config::BindingConfig::Many(command.binding_labels.clone())
-                            },
-                            // The client never executes this field; preserve the opaque endpoint ID
-                            // through the shared config collision resolver.
-                            command: command.command_id.clone(),
-                            action_type,
-                            description: command.description.clone(),
-                            width: None,
-                            height: None,
-                        })
-                    })
-                    .collect();
-                config
-                    .live_keybinds_with_diagnostics()
-                    .map(|(keybinds, _diagnostics)| keybinds)
-                    .map_err(|diagnostics| diagnostics.join("; "))?
-            }
-        };
-        if self.keybinding_source == ClientShellKeybindingSource::Endpoint {
-            for command in commands {
-                let Ok(action) = command.action.try_into() else {
-                    continue;
-                };
-                keybinds
-                    .keybinds
-                    .custom_commands
-                    .push(crate::config::CustomCommandKeybind {
-                        bindings: crate::config::ActionKeybinds::from_labels(
-                            &command.binding_labels,
-                        )?,
-                        label: command.binding_label.clone(),
-                        command: command.command_id.clone(),
-                        action,
-                        description: command.description.clone(),
-                        width: None,
-                        height: None,
-                    });
-            }
-        }
-        self.keybinds = keybinds;
-        Ok(())
-    }
-
     pub(super) fn apply_live_config(
         &mut self,
         config: &Config,
@@ -290,24 +239,9 @@ impl ClientShellConfig {
         let invalid_section =
             |section: &str| invalid_sections.iter().any(|invalid| invalid == section);
 
-        if !invalid_section("keys")
-            && self.keybinding_source != ClientShellKeybindingSource::Endpoint
-        {
-            match config.live_keybinds_with_diagnostics() {
-                Ok((mut keybinds, keybind_diagnostics)) => {
-                    self.local_keys = config.keys.clone();
-                    if self.keybinding_source == ClientShellKeybindingSource::RemoteLocal {
-                        keybinds.keybinds.custom_commands.clear();
-                    }
-                    self.keybinds = keybinds;
-                    diagnostics.extend(keybind_diagnostics);
-                }
-                Err(keybind_diagnostics) => diagnostics.extend(
-                    keybind_diagnostics
-                        .into_iter()
-                        .map(|diagnostic| format!("{diagnostic}; kept current keybinds")),
-                ),
-            }
+        if !invalid_section("keymap") {
+            self.local_keymap_file = config.keymap_file.clone();
+            self.rebuild_keymap();
         }
 
         if !invalid_section("ui") {
@@ -320,6 +254,7 @@ impl ClientShellConfig {
                 self.sidebar_min_width = ui.sidebar_min_width;
                 self.sidebar_max_width = ui.sidebar_max_width;
                 self.sidebar_collapsed_mode = ui.sidebar_collapsed_mode;
+                self.mode_hint_bar = ui.mode_hint_bar.into();
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
@@ -450,6 +385,13 @@ mod tests {
 
     use super::*;
 
+    fn keymap_file(text: &str) -> crate::input::keymap::KeymapText {
+        crate::input::keymap::KeymapText {
+            source: "keymap.kdl".to_owned(),
+            text: text.to_owned(),
+        }
+    }
+
     #[test]
     fn live_reload_applies_client_owned_sections() {
         let mut shell = ClientShellConfig::from_config(&Config::default());
@@ -459,7 +401,7 @@ mod tests {
         next.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
         next.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
         next.ui.sidebar.agents = toml::from_str("rows = [[{ token = 'machine', rules = [{ equals = 'Local', bold = true }] }]]\nrow_gap = 2").unwrap();
-        next.keys.prefix = "ctrl+a".to_owned();
+        next.keymap_file = Some(keymap_file("base prefix=ctrl+a"));
 
         let diagnostics = shell.apply_live_config(&next, &[], &[]);
 
@@ -486,11 +428,11 @@ mod tests {
         shell.apply_live_config(
             &Config::default(),
             &[],
-            &["ui".to_owned(), "keys".to_owned()],
+            &["ui".to_owned(), "keymap".to_owned()],
         );
         assert_eq!(shell.agents, previous);
         assert_eq!(
-            shell.keybinds.prefix,
+            shell.keymap.prefix,
             (KeyCode::Char('a'), KeyModifiers::CONTROL)
         );
     }
@@ -523,18 +465,18 @@ mod tests {
     fn live_reload_preserves_invalid_client_owned_sections() {
         let mut initial = Config::default();
         initial.ui.sidebar_width = 29;
-        initial.keys.prefix = "ctrl+x".to_owned();
+        initial.keymap_file = Some(keymap_file("base prefix=ctrl+x"));
         let mut shell = ClientShellConfig::from_config(&initial);
 
         let mut invalid = Config::default();
         invalid.ui.sidebar_width = 35;
-        invalid.keys.prefix = "ctrl+a".to_owned();
-        let invalid_sections = vec!["ui".to_owned(), "keys".to_owned()];
+        invalid.keymap_file = Some(keymap_file("base prefix=ctrl+a"));
+        let invalid_sections = vec!["ui".to_owned(), "keymap".to_owned()];
         shell.apply_live_config(&invalid, &[], &invalid_sections);
 
         assert_eq!(shell.sidebar_width, 29);
         assert_eq!(
-            shell.keybinds.prefix,
+            shell.keymap.prefix,
             (KeyCode::Char('x'), KeyModifiers::CONTROL)
         );
     }

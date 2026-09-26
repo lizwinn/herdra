@@ -97,6 +97,7 @@ Raw socket method names use dot notation:
 | Area | Methods |
 | --- | --- |
 | Server | `ping`, `server.stop`, `server.reload_config`, `server.agent_manifests`, `server.reload_agent_manifests` |
+| Keymap | `keymap.get` |
 | Notification | `notification.show` |
 | Client | `client.window_title.set`, `client.window_title.clear` |
 | Session | `session.snapshot` |
@@ -894,6 +895,43 @@ Successful responses look like this:
 ```
 
 Fields such as `last_check_unix`, `last_result`, `active_version`, `cached_remote_version`, `remote_update_result`, `remote_update_error`, `remote_last_checked_unix`, and `warning` are omitted when not available. `server.reload_agent_manifests` returns `agent_manifest_reload` with the same `manifests` item shape after reloading the in-memory rule cache.
+
+`keymap.get` returns the keymap the server is using: the built-in base, installed plugin keymaps, and the user's `keymap.kdl`, merged. Menus come in tree order. The first menu has an empty `path` and holds the top-level chords, including the prefix:
+
+```json
+{
+  "id": "req_1",
+  "result": {
+    "type": "keymap",
+    "keymap": {
+      "base": "herdra",
+      "prefix": "ctrl+b",
+      "menus": [
+        {
+          "path": "ctrl+b p",
+          "title": "pane",
+          "sticky": false,
+          "mode": false,
+          "bindings": [
+            {
+              "chord": "v",
+              "keys": "ctrl+b p v",
+              "kind": "action",
+              "target": "pane.split.right",
+              "hint": "split right",
+              "description": "split pane right",
+              "hidden": false,
+              "owner": "builtin"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+`kind` is `action`, `command`, or `menu`. For a menu, `target` is the path of the menu the key opens, or a menu operation such as `menu.back`. `owner` is `builtin`, `user`, or `plugin:<id>`. `view` appears on menus that show a view, and `exit` appears on keys that override their menu's stay-or-close default. `diagnostics` lists problems in the user's keymap file and `conflicts` lists plugin keys that could not be bound; both are omitted when empty. `herdr keymap print --json` prints the same `keymap` object.
 
 `agent.explain` evaluates the target pane's detection snapshot in the running server using the server's active manifest cache:
 
