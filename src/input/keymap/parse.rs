@@ -189,6 +189,8 @@ pub(crate) struct RawMenu {
     pub(crate) bar: Option<BarVisibility>,
     pub(crate) hidden: Option<bool>,
     pub(crate) priority: Option<i32>,
+    /// Keys this menu does not bind are looked up in the menu under it.
+    pub(crate) fallthrough: Option<bool>,
     pub(crate) replace: bool,
     pub(crate) children: Vec<RawNode>,
 }
@@ -377,9 +379,17 @@ pub(crate) fn parse_layer(
 }
 
 fn push_unique(nodes: &mut Vec<RawNode>, node: RawNode, context: &mut Context<'_>) {
+    // A single digit may sit next to a `1..9` range: the digit wins for its
+    // own key and the range keeps the other eight.
+    let digit_beside_range = |existing: &RawNode| {
+        matches!(
+            (existing.chord, node.chord),
+            (Chord::Digits(_), Chord::Key(_)) | (Chord::Key(_), Chord::Digits(_))
+        )
+    };
     if let Some(existing) = nodes
         .iter()
-        .find(|existing| existing.chord.overlaps(node.chord))
+        .find(|existing| existing.chord.overlaps(node.chord) && !digit_beside_range(existing))
     {
         let first_line = existing.line;
         let label = node.chord.label();
@@ -395,7 +405,8 @@ fn push_unique(nodes: &mut Vec<RawNode>, node: RawNode, context: &mut Context<'_
 fn parse_node(node: &KdlNode, depth: usize, context: &mut Context<'_>) -> Option<RawNode> {
     let line = context.line(node.span().offset());
     let name = node.name().value();
-    let parsed = if name == "prefix" {
+    let is_prefix = name == "prefix";
+    let parsed = if is_prefix {
         Ok(Chord::Key(context.prefix))
     } else {
         Chord::parse(name)
@@ -413,7 +424,20 @@ fn parse_node(node: &KdlNode, depth: usize, context: &mut Context<'_>) -> Option
             return None;
         }
     };
-    if depth == 1 && chord.intercepts_typing() {
+    // A built-in key that collides with a custom prefix gives way, so the
+    // prefix keeps working inside that menu (copy mode's ctrl+b page up).
+    if depth > 1 && !is_prefix && *context.owner == LayerOwner::Builtin {
+        if let Chord::Key(combo) = chord {
+            if crate::config::normalize_key_combo(combo)
+                == crate::config::normalize_key_combo(context.prefix)
+            {
+                return None;
+            }
+        }
+    }
+    // The prefix is exempt: whoever set it chose to give up that key, and
+    // `menu.literal` still sends it to the pane.
+    if depth == 1 && !is_prefix && chord.intercepts_typing() {
         context.report(
             line,
             format!(
@@ -648,6 +672,7 @@ fn parse_menu(
             Some("mode") => menu.anchor = Some(true),
             Some("replace") => menu.replace = true,
             Some("hidden") => menu.hidden = Some(true),
+            Some("fallthrough") => menu.fallthrough = Some(true),
             Some(title) if menu.title.is_none() => menu.title = Some(title.to_owned()),
             Some(extra) => context.report(line, format!("unexpected argument {extra:?}")),
             None => context.report(line, "menu arguments must be words or strings"),
@@ -678,6 +703,10 @@ fn parse_menu(
             "replace" => match bool_value(value) {
                 Some(replace) => menu.replace = replace,
                 None => context.report(line, "replace must be #true or #false"),
+            },
+            "fallthrough" => match bool_value(value) {
+                Some(fallthrough) => menu.fallthrough = Some(fallthrough),
+                None => context.report(line, "fallthrough must be #true or #false"),
             },
             "hidden" => match bool_value(value) {
                 Some(hidden) => menu.hidden = Some(hidden),

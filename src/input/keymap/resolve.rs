@@ -1,16 +1,24 @@
 //! Resolves one key press against the active menu stack.
 //!
 //! The top level is where keys go to the pane. A top-level chord opens a
-//! menu. Inside menus, the top menu's bindings apply first, then top-level
-//! chords (so the prefix and prefix-free chords work everywhere), then the
-//! common `esc` and `backspace` bindings.
+//! menu. Inside menus, the top menu's bindings apply first, then the menus
+//! under it while each one says `fallthrough`, then top-level chords (so the
+//! prefix and prefix-free chords work everywhere), then the common `esc` and
+//! `backspace` bindings.
+//!
+//! Opening a submenu stacks it on the menu it was opened from, so
+//! `backspace` goes back one menu. When a leaf closes its menu, the one-shot
+//! menus that were only passed through on the way close with it. Opening a
+//! `mode` menu starts from under those passed-through menus, so leaving the
+//! mode does not reveal them again.
 
 use super::chord::{chord_match, generated_character_key, Chord, MatchPass};
 use super::compile::{CompiledBinding, CompiledKeymap, CompiledTarget, MenuId};
 use super::parse::{ExitPolicy, Unmatched};
 use crate::input::TerminalKey;
 
-pub(crate) const MAX_STACK: usize = super::parse::MAX_MENU_DEPTH + 1;
+/// Room for a full-depth path opened over a mode and the menus in between.
+pub(crate) const MAX_STACK: usize = super::parse::MAX_MENU_DEPTH + 4;
 
 /// Open menus, bottom first. Never empty; the top level is not a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -42,11 +50,6 @@ impl MenuStack {
         } else {
             self.ids[MAX_STACK - 1] = id;
         }
-        self
-    }
-
-    pub(crate) fn replaced_top(mut self, id: MenuId) -> Self {
-        self.ids[usize::from(self.len) - 1] = id;
         self
     }
 
@@ -85,6 +88,56 @@ impl MenuStack {
         self.popped()
             .and_then(|stack| stack.unwound_to_mode(keymap))
     }
+
+    /// Close the top frame after one of its leaves ran, and the one-shot
+    /// menus that were only passed through to reach it.
+    pub(crate) fn left(self, keymap: &CompiledKeymap) -> Option<Self> {
+        self.popped()
+            .and_then(|stack| stack.without_passed_through(keymap))
+    }
+
+    /// The frames that pressing the keys to `menu` opens: its ancestors
+    /// below the top level, starting at the nearest `mode` menu.
+    pub(crate) fn opened_at(keymap: &CompiledKeymap, menu: MenuId) -> Self {
+        let mut chain = Vec::new();
+        let mut current = Some(menu);
+        while let Some(id) = current.filter(|id| *id != MenuId::TOP) {
+            chain.push(id);
+            if keymap.menu(id).anchor || chain.len() == MAX_STACK {
+                break;
+            }
+            current = keymap.menu(id).parent;
+        }
+        let mut frames = chain.into_iter().rev();
+        let mut stack = Self::single(frames.next().unwrap_or(menu));
+        for id in frames {
+            stack = stack.pushed(id);
+        }
+        stack
+    }
+
+    /// Drop one-shot frames from the top until a sticky or `mode` frame.
+    pub(crate) fn without_passed_through(self, keymap: &CompiledKeymap) -> Option<Self> {
+        let mut stack = self;
+        loop {
+            let menu = keymap.menu(stack.top());
+            if menu.sticky || menu.anchor {
+                return Some(stack);
+            }
+            stack = stack.popped()?;
+        }
+    }
+
+    /// Open `child` from the top frame.
+    fn entered(self, keymap: &CompiledKeymap, child: MenuId) -> Self {
+        if !keymap.menu(child).anchor {
+            return self.pushed(child);
+        }
+        match self.without_passed_through(keymap) {
+            Some(base) => base.pushed(child),
+            None => Self::single(child),
+        }
+    }
 }
 
 /// What a key press does.
@@ -119,7 +172,8 @@ pub(crate) enum Effect<'a> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Source {
-    Menu,
+    /// Found in the frame at this depth (1 is the bottom frame).
+    Menu(usize),
     TopLevel,
     Common,
 }
@@ -151,14 +205,20 @@ fn find<'a>(
     None
 }
 
-fn find_in_menu<'a>(
+fn find_in_stack<'a>(
     keymap: &'a CompiledKeymap,
-    menu: MenuId,
+    stack: MenuStack,
     key: &TerminalKey,
 ) -> Option<(&'a CompiledBinding, Option<usize>, Source)> {
-    let bindings = &keymap.menu(menu).bindings;
-    if let Some((binding, index)) = find(bindings, key) {
-        return Some((binding, index, Source::Menu));
+    let frames = stack.frames();
+    for depth in (1..=frames.len()).rev() {
+        let menu = keymap.menu(frames[depth - 1]);
+        if let Some((binding, index)) = find(&menu.bindings, key) {
+            return Some((binding, index, Source::Menu(depth)));
+        }
+        if !menu.fallthrough {
+            break;
+        }
     }
     if let Some((binding, index)) = find(&keymap.top().bindings, key) {
         return Some((binding, index, Source::TopLevel));
@@ -178,12 +238,14 @@ pub(crate) fn resolve<'a>(
             Some((binding, index)) => at_top_level(binding, index),
         };
     };
-    let top = stack.top();
-    let found = find_in_menu(keymap, top, key).or_else(|| {
-        generated_character_key(key).and_then(|generated| find_in_menu(keymap, top, &generated))
-    });
+    let found = find_in_stack(keymap, stack, key)
+        .or_else(|| {
+            generated_character_key(key)
+                .and_then(|generated| find_in_stack(keymap, stack, &generated))
+        })
+        .or_else(|| escape_alias(key).and_then(|escape| find_in_stack(keymap, stack, &escape)));
     let Some((binding, index, source)) = found else {
-        return match keymap.menu(top).unmatched {
+        return match keymap.menu(stack.top()).unmatched {
             Unmatched::Ignore => Step::Ignore,
             Unmatched::Cancel => Step::Apply {
                 next: stack.cancelled(keymap),
@@ -195,28 +257,50 @@ pub(crate) fn resolve<'a>(
             },
         };
     };
-    if source == Source::TopLevel {
-        return from_top_level_inside(keymap, stack, binding, index);
+    match source {
+        Source::TopLevel => from_top_level_inside(keymap, stack, binding, index),
+        Source::Common => apply(keymap, stack, binding, index),
+        // A key found under a `fallthrough` menu acts from its own menu.
+        Source::Menu(depth) => apply(
+            keymap,
+            stack.truncated(depth).unwrap_or(stack),
+            binding,
+            index,
+        ),
     }
+}
+
+/// `ctrl+[` sends the same byte as `esc` in legacy terminals; inside menus,
+/// treat it as `esc` everywhere.
+fn escape_alias(key: &TerminalKey) -> Option<TerminalKey> {
+    (key.code == crossterm::event::KeyCode::Char('[')
+        && key.modifiers == crossterm::event::KeyModifiers::CONTROL)
+        .then(|| {
+            TerminalKey::new(
+                crossterm::event::KeyCode::Esc,
+                crossterm::event::KeyModifiers::empty(),
+            )
+        })
+}
+
+/// Run a binding found in the top frame of `stack`.
+fn apply<'a>(
+    keymap: &'a CompiledKeymap,
+    stack: MenuStack,
+    binding: &'a CompiledBinding,
+    index: Option<usize>,
+) -> Step<'a> {
+    let top = stack.top();
     let menu = keymap.menu(top);
     match binding.target {
-        CompiledTarget::Enter(child) => {
-            if child == top {
-                return Step::Apply {
-                    next: Some(stack),
-                    effect: Effect::None,
-                };
-            }
-            let next = if menu.sticky {
-                stack.pushed(child)
+        CompiledTarget::Enter(child) => Step::Apply {
+            next: Some(if child == top {
+                stack
             } else {
-                stack.replaced_top(child)
-            };
-            Step::Apply {
-                next: Some(next),
-                effect: Effect::None,
-            }
-        }
+                stack.entered(keymap, child)
+            }),
+            effect: Effect::None,
+        },
         CompiledTarget::Back => Step::Apply {
             next: stack.popped(),
             effect: Effect::None,
@@ -237,7 +321,11 @@ pub(crate) fn resolve<'a>(
                     None => menu.sticky,
                 };
             Step::Apply {
-                next: if stays { Some(stack) } else { stack.popped() },
+                next: if stays {
+                    Some(stack)
+                } else {
+                    stack.left(keymap)
+                },
                 effect: Effect::Run { binding, index },
             }
         }

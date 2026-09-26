@@ -41,7 +41,9 @@ prefix prefix id=prefix {
     z pane.zoom hidden
     b app.sidebar hidden
 
-    w navigate hint="workspace nav" view=workspace-list unmatched=ignore id=navigate {
+    // Navigate mode: keys it does not bind fall through to the prefix menu,
+    // so your prefix keys (and your changes to them) work here too.
+    w navigate hint="workspace nav" view=workspace-list unmatched=ignore fallthrough id=navigate {
         esc menu.cancel back
         prefix menu.cancel hidden
         up workspace.list.up workspace stay
@@ -57,34 +59,7 @@ prefix prefix id=prefix {
         left pane.focus.left hidden stay
         right pane.focus.right hidden stay
         "?" app.help stay
-        s app.settings hidden
-        q app.detach hidden
-        R app.reload hidden
-        o agent.notification hidden
-        g app.navigator hidden
-        N workspace.new hidden
-        G worktree.new hidden
-        W workspace.rename hidden
-        D workspace.close hidden
-        c tab.new hidden
-        T tab.rename hidden
-        p tab.previous hidden
-        n tab.next hidden
-        X tab.close hidden
-        P pane.rename hidden
-        e pane.scrollback hidden
-        H pane.swap.left hidden
-        J pane.swap.down hidden
-        K pane.swap.up hidden
-        L pane.swap.right hidden
-        v pane.split.right hidden
-        "-" pane.split.down hidden
-        x pane.close hidden
-        z pane.zoom hidden
-        b app.sidebar hidden
         w menu.cancel hidden
-        r menu.open resize hidden
-        "[" menu.open copy hidden
     }
 
     r resize sticky hidden id=resize {
@@ -133,6 +108,7 @@ prefix prefix id=prefix {
         pageup copy.page.up hidden
         pagedown copy.page.down hidden
         ctrl+f copy.page.down hidden
+        ctrl+b copy.page.up hidden
         ctrl+u copy.halfpage.up hidden
         ctrl+d copy.halfpage.down hidden
         "/" copy.search.forward search

@@ -967,3 +967,101 @@ fn navigation_highlight_ends_for_noop_focus_and_focused_creation() {
         }
     }
 }
+
+fn herdra_state(projected: ClientShellSnapshot) -> ClientShellState {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
+        offset_from_bottom: 0,
+        max_offset_from_bottom: 20,
+        viewport_rows: 2,
+    });
+    state.set_pane_surface(pane_surface);
+    state.compose(100, 28).unwrap();
+    state
+}
+
+#[test]
+fn worktree_keys_under_the_workspace_list_act_on_the_highlighted_workspace() {
+    let mut state = herdra_state(workspaces(2));
+    state.handle_input_bytes(b"\x02w");
+    state.handle_input_bytes(b"j");
+    assert_selected(&state, &ClientEndpointId::Local, "ws_2");
+    state.handle_input_bytes(b"t");
+    assert_eq!(state.mode_name(), "worktree");
+    assert!(state.workspace_list_active(), "the list stays open");
+    let create = state.handle_input_bytes(b"n");
+    let [ClientShellAction::Endpoint { request, .. }] = &create.actions[..] else {
+        panic!("new worktree should prepare through worktree.list");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::WorktreeList(params)
+            if params.workspace_id.as_deref() == Some("ws_2")
+    ));
+    assert_eq!(state.mode, ClientShellMode::Terminal);
+}
+
+#[test]
+fn backspace_from_the_worktree_menu_returns_to_the_workspace_list() {
+    let mut state = herdra_state(workspaces(2));
+    state.handle_input_bytes(b"\x02wjt");
+    state.handle_input_bytes(b"\x7f");
+    assert_eq!(state.mode_name(), "workspace");
+    assert_selected(&state, &ClientEndpointId::Local, "ws_2");
+}
+
+#[test]
+fn closing_copy_mode_under_the_list_forgets_the_list_selection() {
+    let mut state = herdra_state(workspaces(2));
+    assert!(state.enter_copy_mode(&mut ClientShellInput::default()));
+    state.handle_input_bytes(b"\x02w");
+    state.handle_input_bytes(b"j");
+    assert_selected(&state, &ClientEndpointId::Local, "ws_2");
+    state.drop_view_menus(crate::input::keymap::ViewKind::Copy);
+    assert_eq!(state.mode, ClientShellMode::Terminal);
+    assert!(state.navigate_workspace_id.is_none());
+    assert_eq!(state.workspace_action_id().as_deref(), Some("ws_1"));
+}
+
+#[test]
+fn a_digit_for_a_missing_target_closes_one_shot_menus() {
+    let mut state = herdra_state(workspaces(2));
+    let missing = state.handle_input_bytes(b"\x02t5");
+    assert!(missing.actions.is_empty() && missing.requests.is_empty());
+    assert_eq!(state.mode, ClientShellMode::Terminal);
+    let typed = state.handle_input_bytes(b"x");
+    assert_eq!(typed.requests.len(), 1, "the next key reaches the pane");
+
+    state.handle_input_bytes(b"\x02w9");
+    assert_eq!(
+        state.mode_name(),
+        "workspace",
+        "the list waits for a workspace that exists"
+    );
+}
+
+#[test]
+fn foreign_workspace_preview_blocks_command_keys() {
+    let (mut state, _) = state_with_remote();
+    state.config.local_keymap_file = Some(crate::input::keymap::KeymapText {
+        source: "keymap.kdl".into(),
+        text: "base classic\nprefix { y shell \"echo hi\" }\n".into(),
+    });
+    state.config.rebuild_keymap();
+    state.compose(100, 28).unwrap();
+    enter_navigation(&mut state);
+    preview_key(&mut state, b"\x1b[B");
+    assert!(state.workspace_preview_action_blocked());
+    let blocked = state.handle_input_bytes(b"y");
+    assert!(blocked.actions.is_empty() && blocked.requests.is_empty());
+    assert_eq!(
+        state
+            .visible_endpoint_notice
+            .as_ref()
+            .map(|notice| notice.title.as_str()),
+        Some("Confirm workspace first")
+    );
+    assert_eq!(state.mode_name(), "navigate");
+}
