@@ -13,13 +13,7 @@ impl ClientShellState {
                     | ClientShellOverlay::GlobalMenu(_)
             );
         }
-        matches!(
-            self.mode,
-            ClientShellMode::Prefix
-                | ClientShellMode::Navigate
-                | ClientShellMode::Resize
-                | ClientShellMode::Copy
-        )
+        matches!(self.mode, ClientShellMode::Menu(_))
     }
 
     pub(crate) fn reconcile_input_source(&mut self) {

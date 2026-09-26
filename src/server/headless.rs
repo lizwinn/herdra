@@ -59,7 +59,6 @@ use crate::server::clients::{
     latest_shell_client, render_targets, terminal_stream_client_ids, ClientConnection,
     ClientConnectionMode, ClientShellInputTarget, DeferredRender,
 };
-use crate::server::keybindings::{app_keybindings, apply_keybindings};
 use crate::server::notifications::{
     should_forward_toast_to_clients, toast_message_from_state_change, toast_notify_kind,
 };
@@ -210,7 +209,6 @@ pub struct HeadlessServer {
     /// over the configured `ui.window_title` until the API clears it again.
     api_window_title: Option<String>,
     /// Server-owned keybindings, restored when foreground clients use server mode.
-    server_keybindings: crate::config::LiveKeybindConfig,
     /// Full server config warning shown to clients that use server keybindings.
     server_config_diagnostic: Option<String>,
     /// Server config warning with keybinding diagnostics removed for local-keybinding clients.
@@ -320,7 +318,6 @@ impl HeadlessServer {
         #[cfg(windows)]
         spawn_windows_client_accept_thread(listener, should_quit.clone(), server_event_tx.clone());
 
-        let server_keybindings = app_keybindings(&app);
         let headless_size = app.state.headless_size;
         let (server_config_diagnostic, server_config_diagnostic_without_keybindings) =
             server_config_diagnostic_summaries(config_diagnostics);
@@ -352,7 +349,6 @@ impl HeadlessServer {
             ),
             sent_window_title: None,
             api_window_title: None,
-            server_keybindings,
             server_config_diagnostic,
             server_config_diagnostic_without_keybindings,
             terminal_attach_owners: HashMap::new(),
@@ -759,8 +755,6 @@ impl HeadlessServer {
             self.app.state.outer_terminal_focus = None;
             self.app.state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
             self.sync_runtime_view_geometry();
-            let server_keybindings = self.server_keybindings.clone();
-            apply_keybindings(&mut self.app, &server_keybindings);
             self.sync_visible_server_config_diagnostic(false);
             return;
         };
@@ -770,8 +764,6 @@ impl HeadlessServer {
             self.app.state.outer_terminal_focus = None;
             self.app.state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
             self.sync_runtime_view_geometry();
-            let server_keybindings = self.server_keybindings.clone();
-            apply_keybindings(&mut self.app, &server_keybindings);
             self.sync_visible_server_config_diagnostic(false);
             return;
         };
@@ -792,8 +784,6 @@ impl HeadlessServer {
         self.sync_runtime_view_geometry();
         self.app.state.outer_terminal_focus = outer_terminal_focus;
         self.app.state.host_cell_size = host_cell_size;
-        let server_keybindings = self.server_keybindings.clone();
-        apply_keybindings(&mut self.app, &server_keybindings);
         self.sync_visible_server_config_diagnostic(false);
         if outer_terminal_focus == Some(true) {
             self.app.state.mark_active_tab_seen();
@@ -819,11 +809,8 @@ impl HeadlessServer {
     }
 
     fn reload_server_config(&mut self, notify_success: bool) -> crate::config::ConfigReloadReport {
-        let server_keybindings = self.server_keybindings.clone();
-        apply_keybindings(&mut self.app, &server_keybindings);
         let report = self.app.apply_config_from_disk(notify_success);
         self.app.take_config_reloaded_from_disk();
-        self.server_keybindings = app_keybindings(&self.app);
         self.headless_size = self.app.state.headless_size;
         let (server_config_diagnostic, server_config_diagnostic_without_keybindings) =
             server_config_diagnostic_summaries(&report.diagnostics);
@@ -1947,6 +1934,25 @@ impl HeadlessServer {
                         return false;
                     }
                 };
+                let keymap_projection = self.app.keymap_projection(&seed_snapshot.boot_id);
+                let keymap_message = if self
+                    .app
+                    .keymap_projection_needed(endpoint_keybindings, false)
+                {
+                    match crate::protocol::endpoint::keymap_projection_message(&keymap_projection) {
+                        Ok(message) => Some(message),
+                        Err(err) => {
+                            warn!(client_id, err = %err, "failed to encode endpoint keymap");
+                            return false;
+                        }
+                    }
+                } else {
+                    None
+                };
+                connection.shell_keymap_revision = self.app.keymap_revision;
+                connection.shell_keymap_sent = keymap_message.is_some()
+                    && (!keymap_projection.plugins.is_empty()
+                        || keymap_projection.server_keymap.is_some());
                 connection.shell_location = Some(location);
                 connection.shell_snapshot = Some(seed_snapshot);
                 connection.shell_agent_completions = Some(completion_projection);
@@ -1954,6 +1960,9 @@ impl HeadlessServer {
                 self.clients.insert(client_id, connection);
                 if self.app.state.popup_pane.is_some() && self.popup_owner_tab_id.is_none() {
                     self.popup_owner_tab_id = self.shell_tab_id_for_client(client_id);
+                }
+                if let Some(message) = keymap_message {
+                    self.send_to_client(client_id, message);
                 }
                 if let Some(message) = projection_message {
                     self.send_to_client(client_id, message);

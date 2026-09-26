@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn endpoint_product_announcement_is_client_rendered_modal_and_dismissed_by_identity() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.product_announcement =
         Some(crate::protocol::ClientShellProductAnnouncement {
@@ -97,7 +97,7 @@ fn endpoint_product_announcement_is_client_rendered_modal_and_dismissed_by_ident
 
 #[test]
 fn failed_product_announcement_dismiss_reopens_authoritative_snapshot() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.product_announcement =
         Some(crate::protocol::ClientShellProductAnnouncement {
@@ -133,7 +133,7 @@ fn failed_product_announcement_dismiss_reopens_authoritative_snapshot() {
 
 #[test]
 fn release_notes_reconcile_and_failed_dismiss_reopens_authoritative_snapshot() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.latest_release_notes_available = true;
     endpoint_snapshot.release_notes = Some(crate::protocol::ClientShellReleaseNotes {
@@ -189,7 +189,7 @@ fn release_notes_reconcile_and_failed_dismiss_reopens_authoritative_snapshot() {
 
 #[test]
 fn product_announcement_mouse_is_modal_and_closes_only_from_its_button() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.product_announcement =
         Some(crate::protocol::ClientShellProductAnnouncement {
@@ -270,7 +270,7 @@ fn product_announcement_mouse_is_modal_and_closes_only_from_its_button() {
 
 #[test]
 fn onboarding_has_priority_over_endpoint_product_announcement() {
-    let config = ClientShellConfig::from_config(&Config::default()).with_startup_onboarding(true);
+    let config = test_shell_config(&Config::default()).with_startup_onboarding(true);
     let mut state = ClientShellState::new(config);
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.product_announcement =
@@ -290,7 +290,7 @@ fn onboarding_has_priority_over_endpoint_product_announcement() {
 
 #[test]
 fn startup_onboarding_is_client_rendered_and_modal() {
-    let config = ClientShellConfig::from_config(&Config::default()).with_startup_onboarding(true);
+    let config = test_shell_config(&Config::default()).with_startup_onboarding(true);
     let mut state = ClientShellState::new(config);
     let early = state.handle_input_bytes(b"\r");
     assert!(early.actions.is_empty());
@@ -362,8 +362,7 @@ fn onboarding_completion_persists_and_opens_endpoint_integrations() {
     std::fs::write(&path, "[terminal]\ndefault_shell = \"fish\"\n")
         .expect("write onboarding config");
     let onboarding_config = || {
-        let mut config =
-            ClientShellConfig::from_config(&Config::default()).with_startup_onboarding(true);
+        let mut config = test_shell_config(&Config::default()).with_startup_onboarding(true);
         config.local_config_path = path.clone();
         config
     };
@@ -456,8 +455,7 @@ fn onboarding_completion_persists_and_opens_endpoint_integrations() {
 
 #[test]
 fn unavailable_integration_list_does_not_wedge_settings() {
-    let mut config =
-        ClientShellConfig::from_config(&Config::default()).with_startup_onboarding(true);
+    let mut config = test_shell_config(&Config::default()).with_startup_onboarding(true);
     config.local_config_path = std::env::temp_dir().join(format!(
         "herdr-client-onboarding-unavailable-{}-{}.toml",
         std::process::id(),
@@ -491,7 +489,7 @@ fn unavailable_integration_list_does_not_wedge_settings() {
 
 #[test]
 fn startup_config_diagnostics_are_client_rendered_and_persist_until_replaced() {
-    let config = ClientShellConfig::from_config(&Config::default())
+    let config = test_shell_config(&Config::default())
         .with_startup_config_diagnostic(Some("local config warning".into()));
     let mut state = ClientShellState::new(config);
     let mut shared_snapshot = snapshot();
@@ -533,7 +531,7 @@ fn startup_config_diagnostics_are_client_rendered_and_persist_until_replaced() {
 
 #[test]
 fn config_diagnostic_offsets_only_the_pane_rows_it_overlaps() {
-    let mut config = ClientShellConfig::from_config(&Config::default());
+    let mut config = test_shell_config(&Config::default());
     config.toast_delay_seconds = 0;
     let mut state = ClientShellState::new(config);
     let mut endpoint_snapshot = snapshot();
@@ -586,7 +584,7 @@ fn config_diagnostic_offsets_only_the_pane_rows_it_overlaps() {
 
 #[test]
 fn endpoint_reload_result_does_not_override_snapshot_diagnostic_authority() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.config_diagnostic = Some("endpoint warning".into());
     state.set_snapshot(Box::new(endpoint_snapshot));
@@ -616,7 +614,7 @@ fn endpoint_reload_result_does_not_override_snapshot_diagnostic_authority() {
 
 #[test]
 fn endpoint_keybindings_hide_only_local_keybinding_diagnostics() {
-    let config = ClientShellConfig::from_config(&Config::default())
+    let config = test_shell_config(&Config::default())
         .with_keybinding_source(ClientShellKeybindingSource::Endpoint);
     let diagnostics = vec![
         "unsafe direct keybinding: keys.close_pane would intercept typing".into(),
@@ -629,7 +627,7 @@ fn endpoint_keybindings_hide_only_local_keybinding_diagnostics() {
 
 #[test]
 fn live_client_config_keeps_sound_diagnostics() {
-    let mut shell_config = ClientShellConfig::from_config(&Config::default());
+    let mut shell_config = test_shell_config(&Config::default());
     let mut config = Config::default();
     config.ui.sound.path = Some(std::path::PathBuf::from("invalid.wav"));
 
@@ -641,7 +639,7 @@ fn live_client_config_keeps_sound_diagnostics() {
 
 #[test]
 fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.update_available = Some("0.8.3".into());
     endpoint_snapshot.latest_release_notes_available = true;
@@ -677,7 +675,7 @@ fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version()
         state.config.palette.accent
     );
     state.sidebar_collapsed = false;
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     let navigate = state.compose(106, 30).expect("navigate update status");
     let navigate_text = navigate
         .cells
@@ -685,7 +683,7 @@ fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version()
         .map(|cell| cell.symbol.as_str())
         .collect::<String>();
     assert!(navigate_text.contains("update ready"));
-    state.mode = ClientShellMode::Prefix;
+    state.set_mode_name("prefix");
     let prefix = state
         .compose(106, 30)
         .expect("prefix without update status");
@@ -695,7 +693,7 @@ fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version()
         .map(|cell| cell.symbol.as_str())
         .collect::<String>();
     assert!(!prefix_text.contains("update ready"));
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
 
     state.toggle_global_menu();
     let menu = state.compose(106, 30).expect("update menu");
@@ -885,7 +883,7 @@ fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version()
 
 #[test]
 fn coalesced_release_notes_open_and_scroll_uses_current_geometry() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.update_available = Some("0.8.3".into());
     endpoint_snapshot.latest_release_notes_available = true;
@@ -925,7 +923,7 @@ fn coalesced_release_notes_open_and_scroll_uses_current_geometry() {
 
 #[test]
 fn coalesced_release_notes_open_and_mouse_uses_current_geometry() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let body = (0..40)
         .map(|index| format!("- release line {index}"))
         .collect::<Vec<_>>()
@@ -1018,7 +1016,7 @@ fn coalesced_release_notes_open_and_mouse_uses_current_geometry() {
 
 #[test]
 fn outdated_integration_badges_launcher_settings_and_settings_tab() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.integration_updates_available = true;
     state.set_snapshot(Box::new(endpoint_snapshot));
@@ -1070,7 +1068,7 @@ fn outdated_integration_badges_launcher_settings_and_settings_tab() {
 
 #[test]
 fn combined_update_and_integration_attention_preserves_both_badges() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.update_available = Some("0.8.3".into());
     endpoint_snapshot.latest_release_notes_available = true;
@@ -1097,7 +1095,7 @@ fn combined_update_and_integration_attention_preserves_both_badges() {
     assert!(settings < update);
 
     state.overlay = None;
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     let navigate = state.compose(106, 30).expect("combined attention navigate");
     let navigate_text = navigate
         .cells
@@ -1109,7 +1107,7 @@ fn combined_update_and_integration_attention_preserves_both_badges() {
 
 #[test]
 fn current_release_notes_use_whats_new_without_attention_badge() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut endpoint_snapshot = snapshot();
     endpoint_snapshot.latest_release_notes_available = true;
     endpoint_snapshot.release_notes = Some(crate::protocol::ClientShellReleaseNotes {
@@ -1133,7 +1131,7 @@ fn current_release_notes_use_whats_new_without_attention_badge() {
 
 #[test]
 fn client_settings_preview_restore_and_endpoint_integrations_are_owned_by_overlay() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.overlay = Some(ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay {

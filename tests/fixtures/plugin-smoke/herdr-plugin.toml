@@ -4,6 +4,7 @@ version = "0.1.0"
 min_herdr_version = "0.6.10"
 description = "Portable plugin smoke fixture"
 platforms = ["linux", "macos", "windows"]
+keymap = "keymap.kdl"
 
 [[actions]]
 id = "workspace-list"

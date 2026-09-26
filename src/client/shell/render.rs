@@ -28,17 +28,41 @@ pub(in crate::client::shell) fn render_sidebar_background(
     }
 }
 
+/// What the bottom bar shows.
+pub(super) struct ModeBar<'a> {
+    /// The menu that receives keys, if any.
+    pub(super) menu: Option<&'a crate::input::keymap::CompiledMenu>,
+    pub(super) copy_mode: Option<&'a ClientCopyModeState>,
+    pub(super) endpoint_error: Option<&'a str>,
+    /// Show the update badge (the workspace list is open and an update waits).
+    pub(super) update_available: bool,
+    /// Presentation for menus that do not set `bar=`.
+    pub(super) default_bar: crate::input::keymap::BarVisibility,
+}
+
 pub(super) fn render_mode_bar(
     buffer: &mut Buffer,
     pane_area: Rect,
-    mode: ClientShellMode,
-    copy_mode: Option<&ClientCopyModeState>,
-    endpoint_error: Option<&str>,
-    update_available: bool,
-    keybinds: &LiveKeybindConfig,
+    bar_state: ModeBar<'_>,
     palette: &Palette,
 ) -> Option<Rect> {
-    if (mode == ClientShellMode::Terminal && endpoint_error.is_none()) || pane_area.is_empty() {
+    use crate::input::keymap::{BarVisibility, SegmentKind, ViewKind};
+
+    let visibility = bar_state
+        .menu
+        .map(|menu| menu.bar.unwrap_or(bar_state.default_bar));
+    // The copy search prompt is a text field, so it shows even when the bar is hidden.
+    let search_prompt = bar_state
+        .menu
+        .filter(|menu| menu.view == Some(ViewKind::Copy))
+        .and(bar_state.copy_mode)
+        .and_then(|copy_mode| copy_mode.search_prompt.as_ref());
+    let menu = bar_state.menu.filter(|_| {
+        bar_state.endpoint_error.is_some()
+            || search_prompt.is_some()
+            || visibility != Some(BarVisibility::Hidden)
+    });
+    if (menu.is_none() && bar_state.endpoint_error.is_none()) || pane_area.is_empty() {
         return None;
     }
 
@@ -57,161 +81,119 @@ pub(super) fn render_mode_bar(
         .fg(palette.accent)
         .bg(palette.panel_bg)
         .add_modifier(Modifier::BOLD);
-    let mode_style = Style::default()
-        .fg(match palette.panel_bg {
-            ratatui::style::Color::Reset => palette.surface_dim,
-            color => color,
-        })
-        .bg(if mode == ClientShellMode::Resize {
-            palette.mauve
-        } else {
-            palette.accent
-        })
+    let sticky_key = Style::default()
+        .fg(palette.mauve)
+        .bg(palette.panel_bg)
         .add_modifier(Modifier::BOLD);
-    let prefix = crate::config::format_key_combo(keybinds.prefix);
-    let prefix_rhs = |bindings: &crate::config::ActionKeybinds| {
-        bindings
-            .prefix_rhs_label()
-            .unwrap_or_else(|| "unset".to_owned())
+    let badge_style = |sticky: bool| {
+        Style::default()
+            .fg(match palette.panel_bg {
+                ratatui::style::Color::Reset => palette.surface_dim,
+                color => color,
+            })
+            .bg(if sticky {
+                palette.mauve
+            } else {
+                palette.accent
+            })
+            .add_modifier(Modifier::BOLD)
     };
 
     let mut segments = Vec::<(String, Style)>::new();
-    if let Some(error) = endpoint_error {
+    if let Some(error) = bar_state.endpoint_error {
         segments.extend([
-            (" ERROR ".to_owned(), mode_style),
+            (" ERROR ".to_owned(), badge_style(false)),
             (format!(" {error}"), base),
         ]);
-    } else {
-        match mode {
-            ClientShellMode::Prefix => {
-                segments.extend([
-                    (" PREFIX ".to_owned(), mode_style),
-                    (" ".to_owned(), base),
-                    ("esc".to_owned(), key),
-                    (" cancel  ".to_owned(), base),
-                    (prefix, key),
-                    (" send prefix  ".to_owned(), base),
-                    (prefix_rhs(&keybinds.keybinds.workspace_picker), key),
-                    (" workspace nav  ".to_owned(), base),
-                    (prefix_rhs(&keybinds.keybinds.help), key),
-                    (" keybinds".to_owned(), base),
-                ]);
-            }
-            ClientShellMode::Navigate => {
-                segments.extend([
-                    (" NAVIGATE ".to_owned(), mode_style),
-                    (" esc back  ".to_owned(), base),
-                    ("↑/↓".to_owned(), key),
-                    (" workspace  ".to_owned(), base),
-                    ("tab".to_owned(), key),
-                    (" pane  ".to_owned(), base),
-                    (prefix_rhs(&keybinds.keybinds.help), key),
-                    (" keybinds".to_owned(), base),
-                ]);
-            }
-            ClientShellMode::Resize => {
-                segments.extend([
-                    (" RESIZE ".to_owned(), mode_style),
-                    ("  ".to_owned(), base),
-                    ("h/l".to_owned(), key),
-                    (" width  ".to_owned(), base),
-                    ("j/k".to_owned(), key),
-                    (" height  ".to_owned(), base),
-                    ("esc".to_owned(), key),
-                    (" done".to_owned(), base),
-                ]);
-            }
-            ClientShellMode::Copy => {
-                let copy_mode = copy_mode?;
-                if let Some(prompt) = copy_mode.search_prompt.as_ref() {
-                    let marker = match prompt.direction {
-                        crate::api::schema::PaneCopySearchDirection::Forward => "/",
-                        crate::api::schema::PaneCopySearchDirection::Backward => "?",
-                    };
-                    buffer.set_stringn(bar.x, bar.y, " COPY ", usize::from(bar.width), mode_style);
-                    let prefix = 8.min(bar.width);
-                    if bar.width >= 8 {
-                        buffer.set_string(bar.x + 7, bar.y, marker, key);
-                    }
-                    let footer = "  enter search  esc cancel";
-                    let footer_width = if bar.width >= 50 {
-                        footer.len() as u16
-                    } else {
-                        0
-                    };
-                    let field = Rect::new(
-                        bar.x + prefix,
-                        bar.y,
-                        bar.width.saturating_sub(prefix + footer_width),
-                        1,
-                    );
-                    if let Some(cursor) = text_editor::render(
-                        buffer,
-                        field,
-                        &prompt.query,
-                        Style::default().fg(palette.text).bg(palette.panel_bg),
-                    ) {
-                        buffer[(cursor.x, cursor.y)]
-                            .set_style(Style::default().fg(palette.panel_bg).bg(palette.text));
-                    }
-                    if footer_width > 0 {
-                        buffer.set_string(bar.right() - footer_width, bar.y, footer, base);
-                    }
-                    return Some(bar);
-                } else {
-                    let select = if copy_mode.selection.is_some() {
-                        "selecting"
-                    } else {
-                        "select"
-                    };
-                    let match_status = copy_mode
-                        .search_current_global
-                        .map(|current| format!(" {}/{}", current + 1, copy_mode.search_total))
-                        .or_else(|| (!copy_mode.search_query.is_empty()).then(|| " 0/0".to_owned()))
-                        .unwrap_or_default();
-                    let (exit_keys, exit_label) =
-                        if copy_mode.search_query.is_empty() && copy_mode.selection.is_none() {
-                            ("q/esc", " exit")
-                        } else {
-                            ("esc", " clear  q exit")
-                        };
-                    segments.extend([
-                        (" COPY ".to_owned(), mode_style),
-                        (" ".to_owned(), base),
-                        ("h/j/k/l w/b/e { }".to_owned(), key),
-                        (" move  ".to_owned(), base),
-                        ("/ ?".to_owned(), key),
-                        (" search  ".to_owned(), base),
-                        ("n/N".to_owned(), key),
-                        (format!(" repeat{match_status}  "), base),
-                        ("v/space".to_owned(), key),
-                        (format!(" {select}  "), base),
-                        ("y/enter".to_owned(), key),
-                        (" copy  ".to_owned(), base),
-                        (exit_keys.to_owned(), key),
-                        (exit_label.to_owned(), base),
-                    ]);
-                }
-            }
-            ClientShellMode::Terminal => unreachable!(),
-        }
+        write_bar_segments(buffer, bar, &segments);
+        return Some(bar);
+    }
+    let menu = menu?;
+    let copy_view = menu.view == Some(ViewKind::Copy);
+    let mode_style = badge_style(menu.sticky && menu.view.is_none());
+    if let Some(prompt) = search_prompt {
+        render_copy_search_prompt(buffer, bar, menu, prompt, mode_style, key, base, palette);
+        return Some(bar);
+    }
+    let badge = format!(" {} ", menu.badge);
+    if visibility == Some(BarVisibility::Badge) {
+        write_bar_segments(buffer, bar, &[(badge, mode_style)]);
+        return Some(bar);
     }
 
-    let mut x = bar.x;
-    let end = bar.x + bar.width;
-    for (text, style) in segments {
-        if x >= end {
+    let copy_state = bar_state.copy_mode.filter(|_| copy_view);
+    let hints = menu
+        .bar_plan
+        .segments
+        .iter()
+        .map(|segment| {
+            let mut label = segment.label.clone();
+            if let Some(copy_mode) = copy_state {
+                match segment.action_id {
+                    Some("copy.select") if copy_mode.selection.is_some() => {
+                        label = "selecting".to_owned();
+                    }
+                    Some("copy.search.next") => {
+                        let status = copy_mode
+                            .search_current_global
+                            .map(|current| format!(" {}/{}", current + 1, copy_mode.search_total))
+                            .or_else(|| {
+                                (!copy_mode.search_query.is_empty()).then(|| " 0/0".to_owned())
+                            })
+                            .unwrap_or_default();
+                        label.push_str(&status);
+                    }
+                    Some("copy.escape")
+                        if copy_mode.search_query.is_empty() && copy_mode.selection.is_none() =>
+                    {
+                        label = "exit".to_owned();
+                    }
+                    _ => {}
+                }
+            }
+            let key_style = if segment.kind == SegmentKind::Sticky {
+                sticky_key
+            } else {
+                key
+            };
+            (segment.keys.clone(), label, key_style, segment.kind)
+        })
+        .collect::<Vec<_>>();
+
+    let trailing = if bar_state.update_available { 13 } else { 0 };
+    let available = usize::from(bar.width).saturating_sub(trailing);
+    let hint_width = |hint: &(String, String, Style, SegmentKind)| {
+        2 + UnicodeWidthStr::width(hint.0.as_str()) + 1 + UnicodeWidthStr::width(hint.1.as_str())
+    };
+    let badge_width = UnicodeWidthStr::width(badge.as_str());
+    let mut kept = hints.iter().collect::<Vec<_>>();
+    let total = |kept: &[&(String, String, Style, SegmentKind)]| {
+        badge_width + kept.iter().map(|hint| hint_width(hint)).sum::<usize>()
+    };
+    let mut truncated = false;
+    while total(&kept) + if truncated { 2 } else { 0 } > available {
+        let Some(position) = kept
+            .iter()
+            .rposition(|hint| !matches!(hint.3, SegmentKind::Exit | SegmentKind::Help))
+        else {
             break;
-        }
-        let remaining = end - x;
-        buffer.set_stringn(x, bar.y, &text, usize::from(remaining), style);
-        x = x.saturating_add(
-            u16::try_from(UnicodeWidthStr::width(text.as_str()))
-                .unwrap_or(u16::MAX)
-                .min(remaining),
-        );
+        };
+        kept.remove(position);
+        truncated = true;
     }
-    if update_available && mode == ClientShellMode::Navigate {
+
+    segments.push((badge, mode_style));
+    for (index, (keys, label, key_style, _)) in kept.iter().enumerate() {
+        segments.push((if index == 0 { " " } else { "  " }.to_owned(), base));
+        segments.push((keys.clone(), *key_style));
+        segments.push((format!(" {label}"), base));
+    }
+    if truncated {
+        segments.push((" …".to_owned(), base));
+    }
+    write_bar_segments(buffer, bar, &segments);
+
+    if bar_state.update_available {
         let width = 13.min(bar.width);
         let area = Rect::new(bar.right().saturating_sub(width), bar.y, width, 1);
         buffer.set_style(area, Style::default().bg(palette.panel_bg));
@@ -227,6 +209,71 @@ pub(super) fn render_mode_bar(
         );
     }
     Some(bar)
+}
+
+fn write_bar_segments(buffer: &mut Buffer, bar: Rect, segments: &[(String, Style)]) {
+    let mut x = bar.x;
+    let end = bar.x + bar.width;
+    for (text, style) in segments {
+        if x >= end {
+            break;
+        }
+        let remaining = end - x;
+        buffer.set_stringn(x, bar.y, text, usize::from(remaining), *style);
+        x = x.saturating_add(
+            u16::try_from(UnicodeWidthStr::width(text.as_str()))
+                .unwrap_or(u16::MAX)
+                .min(remaining),
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // Bar geometry plus the styles shared with the main bar.
+fn render_copy_search_prompt(
+    buffer: &mut Buffer,
+    bar: Rect,
+    menu: &crate::input::keymap::CompiledMenu,
+    prompt: &ClientCopySearchPrompt,
+    mode_style: Style,
+    key: Style,
+    base: Style,
+    palette: &Palette,
+) {
+    let marker = match prompt.direction {
+        crate::api::schema::PaneCopySearchDirection::Forward => "/",
+        crate::api::schema::PaneCopySearchDirection::Backward => "?",
+    };
+    let badge = format!(" {} ", menu.badge);
+    let badge_width = u16::try_from(UnicodeWidthStr::width(badge.as_str())).unwrap_or(u16::MAX);
+    buffer.set_stringn(bar.x, bar.y, &badge, usize::from(bar.width), mode_style);
+    let prefix = badge_width.saturating_add(2).min(bar.width);
+    if bar.width >= prefix && prefix >= 1 {
+        buffer.set_string(bar.x + prefix - 1, bar.y, marker, key);
+    }
+    let footer = "  enter search  esc cancel";
+    let footer_width = if bar.width >= 50 {
+        footer.len() as u16
+    } else {
+        0
+    };
+    let field = Rect::new(
+        bar.x + prefix,
+        bar.y,
+        bar.width.saturating_sub(prefix + footer_width),
+        1,
+    );
+    if let Some(cursor) = text_editor::render(
+        buffer,
+        field,
+        &prompt.query,
+        Style::default().fg(palette.text).bg(palette.panel_bg),
+    ) {
+        buffer[(cursor.x, cursor.y)]
+            .set_style(Style::default().fg(palette.panel_bg).bg(palette.text));
+    }
+    if footer_width > 0 {
+        buffer.set_string(bar.right() - footer_width, bar.y, footer, base);
+    }
 }
 
 pub(super) struct ShellRenderState<'a> {

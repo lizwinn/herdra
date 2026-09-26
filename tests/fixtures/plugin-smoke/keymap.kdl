@@ -1,0 +1,4 @@
+// The smoke plugin adds one key to the main menu: ctrl+b S lists workspaces.
+prefix {
+    S plugin workspace-list "list workspaces"
+}

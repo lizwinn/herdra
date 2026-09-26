@@ -1,8 +1,8 @@
 use super::*;
-use crate::input::{KeybindAction, KeybindMatch, TerminalKey, TextCommit};
+use crate::input::{TerminalKey, TextCommit};
 
 fn shell(field: usize) -> ClientShellState {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     let mut frame = surface();
     frame.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
@@ -49,10 +49,7 @@ fn shell(field: usize) -> ClientShellState {
             state.handle_input_bytes(b"/");
         }
         9 => {
-            state.record_binding(
-                KeybindMatch::Action(KeybindAction::CopyMode),
-                &mut ClientShellInput::default(),
-            );
+            state.enter_copy_mode(&mut ClientShellInput::default());
             state.handle_input_bytes(b"/");
         }
         _ => unreachable!(),
@@ -352,7 +349,7 @@ fn copy_search_owns_prefix_but_parked_prompt_does_not_steal_input() {
     let mut state = shell(9);
     *editor(&mut state) = TextEditor::from("ab");
     press(&mut state, KeyCode::Char('b'), KeyModifiers::CONTROL);
-    assert_eq!(state.mode, ClientShellMode::Copy);
+    assert_eq!(state.mode_name(), "copy");
     state.handle_raw_events(vec![RawInputEvent::Text(TextCommit::new("X"))]);
     assert_eq!(editor(&mut state).as_str(), "aXb");
     state.open_rename_pane_overlay();
@@ -368,10 +365,10 @@ fn copy_search_owns_prefix_but_parked_prompt_does_not_steal_input() {
         matches!(&input.requests[..], [ClientMessage::ClientShellPaneInput { events, .. }] if matches!(&events[..], [ClientPaneInputEvent::TextCommit(text)] if text == "terminal"))
     );
     assert_eq!(editor(&mut state).as_str(), "aXb");
-    state.mode = ClientShellMode::Copy;
+    state.set_mode_name("copy");
     press(&mut state, KeyCode::Esc, KeyModifiers::NONE);
     press(&mut state, KeyCode::Char('b'), KeyModifiers::CONTROL);
-    assert_eq!(state.mode, ClientShellMode::Prefix);
+    assert_eq!(state.mode_name(), "prefix");
 }
 
 #[test]

@@ -1,4 +1,5 @@
-use crate::config::{Keybinds, NewTerminalCwdConfig, SoundConfig, ToastConfig};
+use crate::config::{NewTerminalCwdConfig, SoundConfig, ToastConfig};
+#[cfg(test)]
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::style::Color;
@@ -820,8 +821,6 @@ pub struct AppState {
     /// None means unsupported or not yet reported, which preserves active-pane suppression.
     pub outer_terminal_focus: Option<bool>,
     // Config
-    pub prefix_code: KeyCode,
-    pub prefix_mods: KeyModifiers,
     /// Virtual terminal size (columns, rows) used when no client is attached.
     pub(crate) headless_size: (u16, u16),
     pub agent_panel_sort: AgentPanelSort,
@@ -854,7 +853,6 @@ pub struct AppState {
     pub pane_scrollback_limit_bytes: usize,
     pub sound: SoundConfig,
     pub toast_config: ToastConfig,
-    pub keybinds: Keybinds,
     /// UI color palette — all sidebar/UI colors centralized for theming.
     pub palette: Palette,
     /// Currently applied theme name (for settings UI).
@@ -1046,8 +1044,6 @@ impl AppState {
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             outer_terminal_focus: None,
-            prefix_code: KeyCode::Char('b'),
-            prefix_mods: KeyModifiers::CONTROL,
             headless_size: (
                 crate::config::DEFAULT_HEADLESS_COLS,
                 crate::config::DEFAULT_HEADLESS_ROWS,
@@ -1079,7 +1075,6 @@ impl AppState {
                 ..SoundConfig::default()
             },
             toast_config: ToastConfig::default(),
-            keybinds: Keybinds::default(),
             palette: Palette::catppuccin(),
             theme_name: "catppuccin".to_string(),
             theme_runtime: ThemeRuntimeConfig {

@@ -565,7 +565,7 @@ new_tabb = "ctrl+t"
         "{stdout}"
     );
     assert!(
-        stdout.contains("unknown config key keys.new_tabb; ignoring key"),
+        stdout.contains("keys.* keybindings are no longer read"),
         "{stdout}"
     );
     assert!(!stdout.contains("commented_out"), "{stdout}");

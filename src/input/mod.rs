@@ -1,6 +1,7 @@
 mod encode;
 mod keybind_help;
 mod keybindings;
+pub(crate) mod keymap;
 mod lease;
 mod model;
 pub(crate) mod mouse;
@@ -13,11 +14,7 @@ pub use encode::{
 pub(crate) use keybind_help::{
     filter_keybind_help_groups, keybind_help_groups, keybind_help_text_char,
 };
-pub(crate) use keybindings::{
-    resolve_custom_command, resolve_direct_binding, resolve_indexed_action,
-    resolve_non_indexed_action, resolve_prefix_binding, KeybindAction, KeybindDispatch,
-    KeybindMatch,
-};
+pub(crate) use keybindings::{CopyCommand, KeybindAction, KeybindMatch, WorkspaceListCommand};
 pub(crate) use lease::{InputLeaseKey, InputLeaseTable, RepeatPlan};
 #[cfg(not(windows))]
 pub use model::ime_compatible_keyboard_enhancement_flags;

@@ -18,6 +18,8 @@ pub(crate) struct ClientShellConfig {
     pub(super) sidebar_max_width: u16,
     pub(super) sidebar_start_collapsed: bool,
     pub(super) sidebar_collapsed_mode: SidebarCollapsedModeConfig,
+    /// Bar presentation for menus that do not set `bar=`.
+    pub(super) mode_hint_bar: crate::input::keymap::BarVisibility,
     pub(super) mobile_width_threshold: u16,
     pub(super) tab_bar_position: TabBarPositionConfig,
     pub(super) hide_tab_bar_when_single_tab: bool,
@@ -35,8 +37,17 @@ pub(crate) struct ClientShellConfig {
     pub(super) theme_name: String,
     pub(super) theme_runtime: crate::app::state::ThemeRuntimeConfig,
     pub(super) palette: Palette,
-    pub(super) keybinds: LiveKeybindConfig,
-    pub(super) local_keys: crate::config::KeysConfig,
+    /// The keymap that routes keys: the base tree, plugin trees from the
+    /// active server, and the user's keymap file.
+    pub(super) keymap: std::sync::Arc<crate::input::keymap::CompiledKeymap>,
+    /// The local keymap file, kept to rebuild the keymap when plugin trees
+    /// arrive from the server.
+    pub(super) local_keymap_file: Option<crate::input::keymap::KeymapText>,
+    /// Keymap trees from the active server's plugins.
+    pub(super) plugin_keymaps: Vec<(String, crate::input::keymap::KeymapText)>,
+    /// The active server's own keymap: `None` until the server sends it,
+    /// `Some(None)` when the server uses the default tree.
+    pub(super) server_keymap: Option<Option<crate::input::keymap::KeymapText>>,
     pub(super) keybinding_source: ClientShellKeybindingSource,
     pub(super) prompt_new_tab_name: bool,
     pub(super) prompt_new_workspace_name: bool,
@@ -267,13 +278,11 @@ pub(crate) struct ClientShellInput {
     pub actions: Vec<ClientShellAction>,
 }
 
+/// Where keys go: straight to the pane, or to the open keymap menus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientShellMode {
     Terminal,
-    Prefix,
-    Navigate,
-    Resize,
-    Copy,
+    Menu(crate::input::keymap::MenuStack),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -824,6 +833,9 @@ pub(super) struct ClientCopySearchResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ClientCopyModeState {
     pub(super) pane_id: String,
+    /// Chord path of the keymap menu that opened copy mode, used to reopen it
+    /// when the pane regains focus.
+    pub(super) menu_path: Option<String>,
     pub(super) content_revision: u64,
     pub(super) geometry: (u16, u16),
     pub(super) alternate_screen_active: bool,
@@ -1119,9 +1131,20 @@ impl ClientShellState {
             self.mode = self.copy_or_terminal_mode();
             self.navigate_workspace_id = None;
         } else {
-            self.mode = ClientShellMode::Navigate;
+            self.mode = self.workspace_list_mode();
         }
         true
+    }
+
+    /// The mode that shows only the workspace list, for entry points that
+    /// open it without a key.
+    pub(super) fn workspace_list_mode(&self) -> ClientShellMode {
+        self.config
+            .keymap
+            .menu_with_view(crate::input::keymap::ViewKind::WorkspaceList)
+            .map_or(ClientShellMode::Terminal, |menu| {
+                ClientShellMode::Menu(crate::input::keymap::MenuStack::single(menu))
+            })
     }
 
     pub(super) fn mobile_layout_active(&self) -> bool {
@@ -1261,9 +1284,7 @@ impl ClientShellState {
         self.selection_highlight_clear_deadline = None;
         self.word_selection_gesture = None;
         self.copy_mode = None;
-        if self.mode == ClientShellMode::Copy {
-            self.mode = ClientShellMode::Terminal;
-        }
+        self.drop_view_menus(crate::input::keymap::ViewKind::Copy);
         self.reset_copy_pipeline();
         self.copy_feedback = None;
         self.copy_feedback_deadline = None;
@@ -1302,40 +1323,6 @@ impl ClientShellState {
         }
         self.active_snapshot_generation = generation;
         self.graphics.set_scope(&graphics_scope);
-        let command_bindings_changed = self.snapshot.as_ref().is_none_or(|current| {
-            current.commands.len() != snapshot.commands.len()
-                || current
-                    .commands
-                    .iter()
-                    .zip(&snapshot.commands)
-                    .any(|(left, right)| {
-                        left.binding_labels != right.binding_labels || left.action != right.action
-                    })
-        });
-        let endpoint_profile_changed = self.snapshot.as_ref().is_none_or(|current| {
-            current.server_keybindings_toml != snapshot.server_keybindings_toml
-        });
-        let snapshot_keybindings_changed = match self.config.keybinding_source {
-            ClientShellKeybindingSource::Local => self
-                .snapshot
-                .as_ref()
-                .is_none_or(|current| current.commands != snapshot.commands),
-            ClientShellKeybindingSource::Endpoint => {
-                endpoint_profile_changed
-                    || self
-                        .snapshot
-                        .as_ref()
-                        .is_none_or(|current| current.commands != snapshot.commands)
-            }
-            ClientShellKeybindingSource::RemoteLocal => false,
-        };
-        let active_keymap_changed = match self.config.keybinding_source {
-            ClientShellKeybindingSource::Local => command_bindings_changed,
-            ClientShellKeybindingSource::Endpoint => {
-                endpoint_profile_changed || command_bindings_changed
-            }
-            ClientShellKeybindingSource::RemoteLocal => false,
-        };
         self.config_diagnostic = super::config::merged_config_diagnostic(
             self.local_config_diagnostic.as_deref(),
             snapshot.config_diagnostic.as_deref(),
@@ -1355,7 +1342,8 @@ impl ClientShellState {
         }
         if boot_changed {
             // A reboot must not turn Enter on a stale preview into focus on a reused ID.
-            let preview = (self.mode == ClientShellMode::Navigate)
+            let preview = self
+                .workspace_list_active()
                 .then(|| self.navigate_workspace_id.take())
                 .flatten();
             self.reset_endpoint_projection();
@@ -1367,21 +1355,6 @@ impl ClientShellState {
             .filter(|previous| Some(previous.as_str()) != snapshot.focused_pane_id.as_deref())
         {
             self.previous_pane_id = Some(previous.clone());
-        }
-        if snapshot_keybindings_changed {
-            if let Err(err) = self.config.apply_snapshot_keybindings(
-                snapshot.server_keybindings_toml.as_deref(),
-                &snapshot.commands,
-            ) {
-                self.set_endpoint_error(err);
-            } else if active_keymap_changed
-                && matches!(
-                    self.mode,
-                    ClientShellMode::Prefix | ClientShellMode::Navigate | ClientShellMode::Resize
-                )
-            {
-                self.mode = ClientShellMode::Terminal;
-            }
         }
         let tab_layout_changed = self.snapshot.as_deref().is_none_or(|current| {
             current.tabs.len() != snapshot.tabs.len()
@@ -1464,12 +1437,15 @@ impl ClientShellState {
                     self.stop_selection_autoscroll();
                     self.selection_highlight_clear_deadline = None;
                 }
-                if self.mode == ClientShellMode::Copy {
-                    self.mode = ClientShellMode::Terminal;
-                }
+                self.drop_view_menus(crate::input::keymap::ViewKind::Copy);
             } else if pane_focused {
                 if self.mode == ClientShellMode::Terminal {
-                    self.mode = ClientShellMode::Copy;
+                    // The incoming snapshot focuses the copy pane again; the
+                    // stored snapshot still has the old focus.
+                    if let Some(menu) = self.copy_menu() {
+                        self.mode =
+                            ClientShellMode::Menu(crate::input::keymap::MenuStack::single(menu));
+                    }
                 }
                 if self.selection.is_none() {
                     self.sync_copy_selection();
@@ -1484,12 +1460,10 @@ impl ClientShellState {
                     self.stop_selection_autoscroll();
                     self.selection_highlight_clear_deadline = None;
                 }
-                if self.mode == ClientShellMode::Copy {
-                    self.mode = ClientShellMode::Terminal;
-                }
+                self.drop_view_menus(crate::input::keymap::ViewKind::Copy);
             }
         }
-        if self.mode == ClientShellMode::Navigate && self.navigate_workspace_id.is_none() {
+        if self.workspace_list_active() && self.navigate_workspace_id.is_none() {
             self.navigate_workspace_id = snapshot
                 .focused_workspace_id
                 .as_deref()

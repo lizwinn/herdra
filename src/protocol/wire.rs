@@ -983,27 +983,13 @@ pub enum ClientShellCommandAction {
     Unknown,
 }
 
-impl From<crate::config::CustomCommandAction> for ClientShellCommandAction {
-    fn from(action: crate::config::CustomCommandAction) -> Self {
-        match action {
-            crate::config::CustomCommandAction::Shell => Self::Shell,
-            crate::config::CustomCommandAction::Pane => Self::Pane,
-            crate::config::CustomCommandAction::Popup => Self::Popup,
-            crate::config::CustomCommandAction::PluginAction => Self::PluginAction,
-        }
-    }
-}
-
-impl TryFrom<ClientShellCommandAction> for crate::config::CustomCommandAction {
-    type Error = ();
-
-    fn try_from(action: ClientShellCommandAction) -> Result<Self, Self::Error> {
-        match action {
-            ClientShellCommandAction::Shell => Ok(Self::Shell),
-            ClientShellCommandAction::Pane => Ok(Self::Pane),
-            ClientShellCommandAction::Popup => Ok(Self::Popup),
-            ClientShellCommandAction::PluginAction => Ok(Self::PluginAction),
-            ClientShellCommandAction::Unknown => Err(()),
+impl From<crate::input::keymap::CommandKind> for ClientShellCommandAction {
+    fn from(kind: crate::input::keymap::CommandKind) -> Self {
+        match kind {
+            crate::input::keymap::CommandKind::Shell => Self::Shell,
+            crate::input::keymap::CommandKind::Pane => Self::Pane,
+            crate::input::keymap::CommandKind::Popup => Self::Popup,
+            crate::input::keymap::CommandKind::Plugin => Self::PluginAction,
         }
     }
 }

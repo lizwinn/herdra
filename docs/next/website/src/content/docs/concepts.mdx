@@ -82,8 +82,6 @@ herdr server stop
 
 ## Modes
 
-Herdr has terminal mode, prefix mode, and navigate mode.
+Keys either go to the focused pane or to Herdr's menus. Every Herdr key lives in one [keymap tree](/docs/keymap/): the prefix key, default `ctrl+b`, opens the main menu, and each menu shows its keys in the bar at the bottom. Menus close after an action unless the key or menu is sticky, which is how repeatable keys like pane resizing work.
 
-Terminal mode sends keys to the focused pane. Prefix mode waits for one Herdr action after the prefix key. Navigate mode is the persistent workspace navigation surface.
-
-Press the prefix key, default `ctrl+b`, then an action key such as `c` for a new tab or `w` for workspace navigation. See [Keyboard](/docs/keyboard/) if the prefix idea is new to you.
+Some menus attach a view. The workspace menu (`ctrl+b w`) shows the workspace list, and copy mode (`ctrl+b p y`) turns the focused pane's scrollback into a keyboard-driven selection. Copy mode is a mode: menus opened from inside it return to it. See [Keyboard](/docs/keyboard/) if the prefix idea is new to you.

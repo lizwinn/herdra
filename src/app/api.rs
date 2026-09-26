@@ -938,6 +938,12 @@ impl App {
                     },
                 }
             }
+            Method::KeymapGet(_) => SuccessResponse {
+                id: request.id,
+                result: ResponseResult::Keymap {
+                    keymap: crate::input::keymap::describe(&self.keymap),
+                },
+            },
             Method::ServerAgentManifests(_) => {
                 self.state.refresh_agent_manifest_summaries();
                 let update_status = crate::detect::manifest_update::load_status();
@@ -1575,6 +1581,59 @@ mod tests {
         )
         .await
         .expect("manual manifest reload should reset detection runtimes");
+    }
+
+    #[test]
+    fn keymap_get_describes_the_effective_keymap() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let config = crate::config::Config {
+            keymap_file: Some(crate::input::keymap::KeymapText {
+                source: "keymap.kdl".into(),
+                text: "base prefix=ctrl+a\nprefix { t { c tab.new } }\n".into(),
+            }),
+            ..crate::config::Config::default()
+        };
+        let mut app = App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "keymap".into(),
+            method: crate::api::schema::Method::KeymapGet(
+                crate::api::schema::EmptyParams::default(),
+            ),
+        });
+        let response: crate::api::schema::SuccessResponse =
+            serde_json::from_str(&response).unwrap();
+        let crate::api::schema::ResponseResult::Keymap { keymap } = response.result else {
+            panic!("expected keymap result");
+        };
+        assert_eq!(keymap.base, "herdra");
+        assert_eq!(keymap.prefix, "ctrl+a");
+        assert_eq!(keymap.menus[0].path, "");
+        let tab = keymap
+            .menus
+            .iter()
+            .find(|menu| menu.path == "ctrl+a t")
+            .expect("tab menu");
+        let create = tab
+            .bindings
+            .iter()
+            .find(|binding| binding.chord == "c")
+            .expect("user binding");
+        assert_eq!(create.keys, "ctrl+a t c");
+        assert_eq!(create.kind, "action");
+        assert_eq!(create.target, "tab.new");
+        assert_eq!(create.owner, "user");
+        let new_tab = tab
+            .bindings
+            .iter()
+            .find(|binding| binding.chord == "n")
+            .expect("default binding");
+        assert_eq!(new_tab.owner, "builtin");
     }
 
     #[tokio::test]

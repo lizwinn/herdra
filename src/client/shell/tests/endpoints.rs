@@ -59,7 +59,7 @@ fn current_workspace_view() -> crate::api::schema::AgentViewSetParams {
 }
 
 fn state_with_remote() -> (ClientShellState, ClientEndpointId) {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let profile = remote_profile();
     let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
     state.set_endpoint_catalog(&[profile]);
@@ -412,7 +412,7 @@ fn switching_machines_from_copy_mode_restores_terminal_input() {
     state.set_pane_surface(local_surface);
     state.compose(100, 28).unwrap();
     assert!(state.enter_copy_mode(&mut ClientShellInput::default()));
-    assert_eq!(state.mode, ClientShellMode::Copy);
+    assert_eq!(state.mode_name(), "copy");
 
     assert!(state.activate_endpoint_projection(&remote));
     let mut remote_surface = surface();
@@ -463,7 +463,7 @@ fn live_catalog_active_removal_does_not_retain_remote_projection_or_input() {
     let (mut state, remote) = state_with_remote();
     assert!(state.activate_endpoint_projection(&remote));
     state.set_pane_surface(surface());
-    state.mode = ClientShellMode::Prefix;
+    state.set_mode_name("prefix");
     state.overlay = Some(ClientShellOverlay::Onboarding);
     state.select_unavailable_local();
     state.retire_endpoint(&remote);
@@ -488,7 +488,7 @@ fn live_catalog_active_removal_does_not_retain_remote_projection_or_input() {
 #[test]
 fn machine_navigation_does_not_require_a_local_snapshot_or_surface() {
     for (cols, rows) in [(100, 28), (36, 18)] {
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        let mut state = ClientShellState::new(test_shell_config(&Config::default()));
         let profile = remote_profile();
         let remote = ClientEndpointId::Ssh(profile.id.clone());
         state.set_endpoint_catalog(&[profile]);
@@ -1021,7 +1021,7 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
         AgentSidebarToken::Machine,
         AgentSidebarToken::Agent,
     ]];
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state = ClientShellState::new(test_shell_config(&config));
     let profile = remote_profile();
     let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
     state.set_endpoint_catalog(&[profile]);
@@ -1081,7 +1081,7 @@ fn current_workspace_agent_view_excludes_same_workspace_id_on_other_machine() {
     let mut config = Config::default();
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state = ClientShellState::new(test_shell_config(&config));
     let profile = remote_profile();
     let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
     state.set_endpoint_catalog(&[profile]);
@@ -1147,7 +1147,7 @@ fn current_workspace_or_blocked_keeps_foreign_attention_only() {
     let mut config = Config::default();
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state = ClientShellState::new(test_shell_config(&config));
     let profile = remote_profile();
     let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
     state.set_endpoint_catalog(&[profile]);
@@ -1217,7 +1217,7 @@ fn selected_default_view_ignores_inactive_endpoint_projection() {
     let mut config = Config::default();
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state = ClientShellState::new(test_shell_config(&config));
     let profile = remote_profile();
     let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
     state.set_endpoint_catalog(&[profile]);
@@ -1265,7 +1265,7 @@ fn selected_default_view_ignores_inactive_endpoint_projection() {
 
 #[test]
 fn newer_snapshot_does_not_reuse_stale_agent_view_projection() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut local = snapshot();
     local.agent_view_label = Some("current space".into());
     state.set_snapshot(Box::new(local.clone()));
@@ -1314,7 +1314,7 @@ fn legacy_custom_views_keep_v1_per_endpoint_projection() {
     let mut config = Config::default();
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state = ClientShellState::new(test_shell_config(&config));
     let profile = remote_profile();
     let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
     state.set_endpoint_catalog(&[profile]);
@@ -1360,7 +1360,7 @@ fn selected_custom_sort_orders_rendering_and_indexed_navigation() {
     config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state = ClientShellState::new(test_shell_config(&config));
     let profile = remote_profile();
     let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
     state.set_endpoint_catalog(&[profile]);
@@ -1422,7 +1422,7 @@ fn selected_position_sort_uses_public_tab_and_pane_numbers() {
         AgentViewSortOrder,
     };
 
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut selected = snapshot();
     selected.agent_view_label = Some("positions".into());
 
@@ -1491,7 +1491,7 @@ fn aggregate_priority_uses_client_observed_recency_across_machines() {
     config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state = ClientShellState::new(test_shell_config(&config));
     let profile = remote_profile();
     let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
     state.set_endpoint_catalog(&[profile]);
@@ -2114,7 +2114,7 @@ fn navigator_uses_machine_parents_only_for_federated_clients() {
         assert_eq!(prefix, expected, "{target:?}");
     }
 
-    let mut local = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut local = ClientShellState::new(test_shell_config(&Config::default()));
     local.set_snapshot(Box::new(snapshot()));
     local.set_pane_surface(surface());
     let frame = local.compose(100, 28).expect("local-only sidebar");
@@ -2283,7 +2283,7 @@ fn mobile_foreign_agent_and_workspace_targets_activate_their_endpoint() {
         .as_mut()
         .expect("remote snapshot")
         .agents = vec![agent("remote agent", AgentStatus::Working, 2)];
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     state.compose(44, 30).expect("mobile switcher");
     let remote_agent = state
         .hits
@@ -2317,7 +2317,7 @@ fn mobile_foreign_agent_and_workspace_targets_activate_their_endpoint() {
         }] if activated == &endpoint_id && pane_id == "pane_1"
     ));
 
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     state.compose(44, 30).expect("mobile switcher");
     let remote_workspace = state
         .hits
@@ -2406,7 +2406,7 @@ fn cached_offline_navigator_and_mobile_targets_are_dimmed_and_disabled() {
     ));
 
     state.overlay = None;
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     let frame = state.compose(44, 30).expect("offline mobile switcher");
     let mobile_target = state
         .hits
@@ -2435,7 +2435,7 @@ fn cached_offline_navigator_and_mobile_targets_are_dimmed_and_disabled() {
         modifiers: KeyModifiers::empty(),
     })]);
     assert!(outcome.actions.is_empty());
-    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.mode_name(), "navigate");
     assert_eq!(state.active_endpoint_id, ClientEndpointId::Local);
 }
 

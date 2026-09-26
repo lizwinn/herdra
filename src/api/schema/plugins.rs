@@ -59,6 +59,10 @@ pub struct InstalledPluginInfo {
     pub panes: Vec<PluginManifestPane>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_handlers: Vec<PluginManifestLinkHandler>,
+    /// Keymap tree file inside the plugin root, merged into the keymap while
+    /// the plugin is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keymap: Option<String>,
     #[serde(default)]
     pub source: PluginSourceInfo,
     /// Warnings collected at link time or on registry load (e.g. unknown event names,

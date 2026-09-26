@@ -35,25 +35,25 @@ Or `codex`, `pi`, `opencode`, or any other [supported agent](/docs/agents/). Her
 
 ## Keyboard control
 
-Keyboard control is optional; the mouse covers everything. Press `ctrl+b` to enter prefix mode, then press an action key.
+Keyboard control is optional; the mouse covers everything. Press `ctrl+b` to open Herdr's main menu; the bar at the bottom shows what each key does next.
 
 Common actions:
 
-| Action | Key |
+| Action | Keys |
 | --- | --- |
-| Split right | `prefix+v` |
-| Split down | `prefix+minus` |
-| New tab | `prefix+c` |
-| Next / previous tab | `prefix+n` / `prefix+p` |
-| Workspace navigation | `prefix+w` |
-| New workspace | `prefix+shift+n` |
-| Detach client | `prefix+q` |
+| Split right | `ctrl+b p v` |
+| Split down | `ctrl+b p -` |
+| New tab | `ctrl+b t n` |
+| Next / previous tab | `ctrl+b t ]` / `ctrl+b t [` |
+| Workspace list | `ctrl+b w` |
+| New workspace | `ctrl+b w n` |
+| Detach client | `ctrl+b s d` |
 
-If the prefix idea is new to you, [Keyboard](/docs/keyboard/) explains what it is, why multiplexers use one, and how to go prefix-free. Press `prefix+?` inside Herdr to see every active binding, and `prefix+[` to copy from the keyboard in copy mode.
+If the prefix idea is new to you, [Keyboard](/docs/keyboard/) explains what it is, why multiplexers use one, and how to go prefix-free. Press `ctrl+b ?` inside Herdr to see every key, and `ctrl+b p y` to copy from the keyboard in copy mode. Every key can be changed in [keymap.kdl](/docs/keymap/).
 
 ## Detach and come back
 
-Press `prefix+q` or simply close your terminal window. The Herdr server and every agent keep running. Run `herdr` again to reattach to the same session.
+Press `ctrl+b s d` or simply close your terminal window. The Herdr server and every agent keep running. Run `herdr` again to reattach to the same session.
 
 To end the session and stop its panes:
 

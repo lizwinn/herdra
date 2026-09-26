@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn navigate_update_status_uses_released_desktop_and_mobile_placement() {
-    let mut config = ClientShellConfig::from_config(&Config::default());
+    let mut config = test_shell_config(&Config::default());
     config.tab_bar_position = crate::config::TabBarPositionConfig::Bottom;
     config.hide_tab_bar_when_single_tab = false;
     let mut state = ClientShellState::new(config);
@@ -10,7 +10,7 @@ fn navigate_update_status_uses_released_desktop_and_mobile_placement() {
     endpoint_snapshot.update_available = Some("0.8.3".into());
     state.set_snapshot(Box::new(endpoint_snapshot));
     state.set_pane_surface(surface());
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
 
     let bottom = state.compose(106, 30).expect("bottom-tab update shell");
     let row_text = |frame: &FrameData, row: u16| {
@@ -58,7 +58,7 @@ fn navigate_update_status_uses_released_desktop_and_mobile_placement() {
 
 #[test]
 fn mobile_layout_reserves_only_client_header() {
-    let config = ClientShellConfig::from_config(&Config::default());
+    let config = test_shell_config(&Config::default());
     let state = ClientShellState::new(config);
     let layout = state.layout(44, 20);
     assert_eq!(layout.mobile_header, Rect::new(0, 0, 44, 2));
@@ -71,7 +71,7 @@ fn mobile_layout_reserves_only_client_header() {
 
 #[test]
 fn mobile_switcher_can_activate_an_online_saved_machine() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let profile = crate::client::endpoint::SavedSshEndpoint {
         id: crate::client::endpoint::ProfileId::parse("0123456789abcdef0123456789abcdef").unwrap(),
         label: "Build".into(),
@@ -87,7 +87,7 @@ fn mobile_switcher_can_activate_an_online_saved_machine() {
     let mut remote = snapshot();
     remote.boot_id = "remote-boot".into();
     state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
 
     let frame = state.compose(44, 30).expect("mobile machine switcher");
     let text = frame
@@ -120,7 +120,7 @@ fn mobile_switcher_can_activate_an_online_saved_machine() {
     ));
 
     // Local is still projected until the remote handoff completes.
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     state.compose(44, 30).unwrap();
     let local = state
         .hits
@@ -151,7 +151,7 @@ fn mobile_switcher_can_activate_an_online_saved_machine() {
     state.set_pane_surface(remote_surface);
     state.mark_endpoint_disconnected(&endpoint_id);
     state.receive_endpoint_unavailable("network lost".into());
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     let stale = state.compose(44, 30).expect("stale mobile switcher");
     let text = stale
         .cells
@@ -164,7 +164,7 @@ fn mobile_switcher_can_activate_an_online_saved_machine() {
 
 #[test]
 fn mobile_shell_controls_remain_clickable_when_pane_mouse_capture_is_disabled() {
-    let mut config = ClientShellConfig::from_config(&Config::default());
+    let mut config = test_shell_config(&Config::default());
     config.mouse_capture = false;
     let mut state = ClientShellState::new(config);
     state.set_snapshot(Box::new(snapshot()));
@@ -178,7 +178,7 @@ fn mobile_shell_controls_remain_clickable_when_pane_mouse_capture_is_disabled() 
         row: switch.y,
         modifiers: KeyModifiers::empty(),
     })]);
-    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.mode_name(), "navigate");
     state.compose(44, 20).expect("mobile switcher");
     assert!(!state.hits.mobile_close.is_empty());
     assert!(!state.hits.mobile_targets.is_empty());
@@ -186,7 +186,7 @@ fn mobile_shell_controls_remain_clickable_when_pane_mouse_capture_is_disabled() 
 
 #[test]
 fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut projected = snapshot();
     projected.agents.push(ClientShellAgent {
         pane_id: "pane_1".into(),
@@ -234,7 +234,7 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
     };
     let opened = state.handle_raw_events(vec![click(state.hits.mobile_switch)]);
     assert!(opened.repaint);
-    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.mode_name(), "navigate");
     let switcher = state.compose(44, 20).expect("mobile switcher");
     let switcher_text = switcher
         .cells
@@ -347,7 +347,7 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
 
 #[test]
 fn mobile_background_workspace_uses_its_own_active_tab_status() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut projected = snapshot();
     projected.tabs.push(ClientShellTab {
         tab_id: "tab_7".into(),
@@ -387,7 +387,7 @@ fn mobile_background_workspace_uses_its_own_active_tab_status() {
     }
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_2");
     let frame = state.compose(44, 20).expect("mobile switcher");
     let text = frame
@@ -407,7 +407,7 @@ fn mobile_background_workspace_uses_its_own_active_tab_status() {
 
 #[test]
 fn mobile_switcher_create_and_menu_rows_reuse_client_actions() {
-    let mut config = ClientShellConfig::from_config(&Config::default());
+    let mut config = test_shell_config(&Config::default());
     config.prompt_new_workspace_name = true;
     config.prompt_new_tab_name = true;
     let mut state = ClientShellState::new(config);
@@ -422,7 +422,7 @@ fn mobile_switcher_create_and_menu_rows_reuse_client_actions() {
         })
     };
 
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     state.compose(44, 20).expect("mobile create switcher");
     let new_tab = state
         .hits
@@ -445,7 +445,7 @@ fn mobile_switcher_create_and_menu_rows_reuse_client_actions() {
     assert!(state.overlay.is_none());
     assert_eq!(state.mode, ClientShellMode::Terminal);
 
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     state.compose(44, 20).expect("mobile workspace switcher");
     let new_workspace = state
         .hits
@@ -470,7 +470,7 @@ fn mobile_switcher_create_and_menu_rows_reuse_client_actions() {
     assert!(state.overlay.is_none());
     assert_eq!(state.mode, ClientShellMode::Terminal);
 
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     state.compose(44, 20).expect("mobile menu switcher");
     let settings = state
         .hits
@@ -495,14 +495,14 @@ fn mobile_switcher_create_and_menu_rows_reuse_client_actions() {
 fn mobile_menu_keeps_inert_notes_open_and_cancel_without_workspace_in_navigate() {
     let mut source_config = Config::default();
     source_config.ui.prompt_new_workspace_name = true;
-    let config = ClientShellConfig::from_config(&source_config);
+    let config = test_shell_config(&source_config);
     let mut projected = snapshot();
     projected.latest_release_notes_available = true;
     projected.release_notes = None;
     let mut state = ClientShellState::new(config);
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     state.compose(44, 20).expect("mobile switcher");
     let inert_notes = state
         .hits
@@ -516,7 +516,7 @@ fn mobile_menu_keeps_inert_notes_open_and_cancel_without_workspace_in_navigate()
         row: inert_notes.y,
         modifiers: KeyModifiers::empty(),
     })]);
-    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.mode_name(), "navigate");
     assert!(state.overlay.is_none());
     assert!(!state.mobile_switcher_suspended);
 
@@ -527,10 +527,10 @@ fn mobile_menu_keeps_inert_notes_open_and_cancel_without_workspace_in_navigate()
     empty.workspaces.clear();
     empty.tabs.clear();
     empty.panes.clear();
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&source_config));
+    let mut state = ClientShellState::new(test_shell_config(&source_config));
     state.set_snapshot(Box::new(empty));
     state.set_pane_surface(surface());
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     state.compose(44, 20).expect("empty mobile switcher");
     let new_workspace = state
         .hits
@@ -551,7 +551,7 @@ fn mobile_menu_keeps_inert_notes_open_and_cancel_without_workspace_in_navigate()
         KeyCode::Esc,
         KeyModifiers::empty(),
     ))]);
-    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.mode_name(), "navigate");
 }
 
 #[test]
@@ -573,7 +573,7 @@ fn mobile_previous_workspace_action_wraps_across_expanded_entries() {
             agent_status: AgentStatus::Idle,
         });
     }
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
     state.compose(44, 20).expect("mobile layout");
@@ -595,7 +595,7 @@ fn mobile_previous_workspace_action_wraps_across_expanded_entries() {
 
 #[test]
 fn mobile_switcher_scroll_close_and_width_transition_clear_mobile_hits() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     let mut projected = snapshot();
     for index in 2..=8 {
         projected.workspaces.push(ClientShellWorkspace {
@@ -666,7 +666,7 @@ fn mobile_switcher_scroll_close_and_width_transition_clear_mobile_hits() {
     assert!(state.hits.mobile_close.is_empty());
     assert!(state.hits.mobile_targets.is_empty());
 
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     let short = state.compose(44, 2).expect("short mobile switcher");
     assert_eq!(short.cells[0].symbol, "─");
     assert!(state.hits.mobile_close.is_empty());

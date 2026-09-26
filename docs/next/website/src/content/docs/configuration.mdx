@@ -117,82 +117,38 @@ Remote attach manages its SSH connection with temporary keepalives and, where su
 ```toml
 [remote]
 manage_ssh_config = true
+image_paste_key = "ctrl+v"
 ```
 
 When enabled, `herdr --remote` writes a private temporary SSH config that includes your user and system SSH configs first, then adds fallback `ServerAliveInterval` and `ServerAliveCountMax` values. Your own keepalive settings win. Linux and macOS clients also use a private per-attach OpenSSH control socket to reuse the first authenticated connection; Windows OpenSSH does not. Set `manage_ssh_config = false` to run remote attach through plain `ssh` without Herdr's generated config or control socket.
 
+`image_paste_key` is the raw key that pastes a clipboard image into the remote pane during `herdr --remote`. Set it to `""` to disable it. It replaces `keys.remote_image_paste`.
+
 ## Keybindings
 
-For a guided introduction to the prefix and a vetted prefix-free setup, see [Keyboard](/docs/keyboard/).
-
-Herdr has a prefix mode similar to tmux. The default prefix is `ctrl+b`. Keybinding strings are explicit: `prefix+n` means press the configured prefix and then `n`; `ctrl+alt+n` is a direct terminal-mode shortcut.
-
-A small keybinding override looks like this:
+Keys no longer live in `config.toml`. Every key is part of the keymap tree in `keymap.kdl` next to this file; see [Keymap](/docs/keymap/) for the format and [Keyboard](/docs/keyboard/) for a guided introduction.
 
 ```toml
-[keys]
-prefix = "ctrl+b"
-goto = "prefix+g"
-new_tab = "prefix+c"
-next_tab = "prefix+n"
-previous_tab = "prefix+p"
-focus_pane_left = "prefix+h"
-navigate_workspace_down = "j"
-navigate_pane_down = "ctrl+j"
-split_horizontal = "prefix+minus"
+[keymap]
+path = "keymap.kdl"   # optional; relative paths start from the config directory
 ```
 
-The default keymap is prefix-first so Herdr does not steal input from shells, editors, tmux, or terminal apps. Search `keys.` in the [Config reference](/docs/config-reference/) to see every action and default binding. The in-app help panel at `prefix+?` shows the active bindings.
+`HERDR_KEYMAP_PATH` overrides the path. Herdr reports an old `[keys]` table in `herdr config check`; run `herdr keymap migrate` to convert `[keys]`, `[keys.indexed]`, and `[[keys.command]]` into `keymap.kdl`.
 
-A binding may also be an array when one action needs multiple shortcuts:
+## Command keys
 
-```toml
-[keys]
-next_tab = ["prefix+n", "ctrl+alt+]"]
+Keys can run commands. Define them as leaves in `keymap.kdl`:
+
+```kdl
+prefix {
+    g popup "lazygit" "run lazygit" width="80%" height="80%"
+    l plugin "example.layout.apply" "apply layout"
+    u shell "git pull"
+    b pane "cargo build"
+}
 ```
 
-Optional actions are unset by default. Bind them with `prefix+` for prefix-mode behavior, or use an explicit modified chord when you intentionally want a direct shortcut. For example, tmux-style one-keystroke pane resizing without entering resize mode:
-
-```toml
-[keys]
-resize_pane_left = "ctrl+shift+alt+left"
-resize_pane_down = "ctrl+shift+alt+down"
-resize_pane_up = "ctrl+shift+alt+up"
-resize_pane_right = "ctrl+shift+alt+right"
-```
-
-Key strings accept plain keys, modifier combinations such as `ctrl+a`, `shift+n`, `alt+1`, `cmd+k`, and special keys such as `enter`, `tab`, `esc`, `left`, `right`, `up`, and `down`. Named punctuation such as `minus`, `comma`, `ampersand`, `plus`, and `backtick` is also accepted. Plain direct printable keys such as `n` are unsafe because they intercept typing; use `prefix+n` unless you intentionally want a direct binding. The `navigate_workspace_*` and `navigate_pane_*` fields are navigate-mode-only and may use plain keys such as `j` or `k`; they must not use `prefix+`, `esc`, `enter`, `tab`, `shift+tab`, `left`, `right`, or unmodified `1` through `9`. Left and right arrows are permanent aliases for pane-left and pane-right navigation. These navigate-mode shortcuts are independent from general action bindings such as `focus_pane_down = "prefix+j"`; when both use the same key, the navigate-mode shortcut wins while navigate mode is open. Alt, Cmd/Super, and punctuation with modifiers depend on your terminal and tmux settings.
-
-If you have old custom keybindings and want the new defaults, run `herdr config reset-keys`. Herdr backs up `config.toml`, removes `[keys]` and `[[keys.command]]`, and uses built-in v2 defaults after restart or `herdr server reload-config`.
-
-## Indexed jumps
-
-Indexed keybindings use `1..9` in normal keybinding fields:
-
-```toml
-[keys]
-switch_tab = "prefix+1..9"
-switch_workspace = "prefix+shift+1..9"
-focus_agent = "prefix+alt+1..9"
-```
-
-The legacy `[keys.indexed]` table is still parsed for compatibility, but new configs should prefer the explicit action fields.
-
-## Custom command keybindings
-
-Custom commands use the same keybinding syntax.
-
-```toml
-[[keys.command]]
-key = "prefix+alt+g"
-type = "popup"
-command = "lazygit"
-description = "run lazygit"
-width = "80%"
-height = "80%"
-```
-
-`type = "popup"` opens a session-modal popup without changing the tab layout.
+`popup` opens a session-modal popup without changing the tab layout.
 The popup receives all terminal input, including Escape, until its command
 exits. `width` and `height` are optional; omit them for the default half-size
 popup, use numbers for terminal cells, or use strings like `"80%"` for a
@@ -203,39 +159,28 @@ values smaller than the popup minimum are clamped. Popup commands do not receive
 On Unix and macOS, a popup command can also provide an ad-hoc terminal without
 adding a split or tab:
 
-```toml
-[[keys.command]]
-key = "prefix+t"
-type = "popup"
-command = "exec \"${SHELL:-sh}\""
-description = "open scratch terminal"
-width = "80%"
-height = "80%"
+```kdl
+prefix {
+    T popup "exec \"${SHELL:-sh}\"" "open scratch terminal" width="80%" height="80%"
+}
 ```
 
-On Windows, use a shell command such as `command = "powershell.exe -NoLogo"`
+On Windows, use a shell command such as `popup "powershell.exe -NoLogo"`
 instead. Exit the shell to close the popup and restore the tiled terminal view.
 
-`type = "pane"` opens a temporary zoomed pane and closes it when the command exits.
+`pane` opens a temporary zoomed pane and closes it when the command exits.
 
-`type = "shell"` runs detached in the background.
+`shell` runs detached in the background.
 
-`type = "plugin_action"` invokes an installed plugin action id. Use the
-qualified id when action ids are not globally unique:
+`plugin` invokes an installed plugin action id. Use the qualified id when action
+ids are not globally unique.
 
-```toml
-[[keys.command]]
-key = "prefix+l"
-type = "plugin_action"
-command = "example.layout.apply"
-description = "apply layout"
-```
+The word after the command is optional. When set, it is the key's label in the
+bar and in the keybind help panel (`ctrl+b ?`).
 
-`description` is optional. When set, it appears in the keybind help panel (opened with `prefix+?`) instead of the default `'custom command'` label.
-
-Custom commands receive `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH`, `HERDR_ACTIVE_WORKSPACE_ID`, `HERDR_ACTIVE_TAB_ID`, `HERDR_ACTIVE_PANE_ID`, and `HERDR_ACTIVE_PANE_CWD` when those values are available. Shell commands run from the focused pane's working directory when Herdr can detect it.
-
-On Windows, custom command strings use `cmd.exe /d /c`, so environment variables use `%HERDR_BIN_PATH%` syntax. To run PowerShell syntax, invoke it explicitly, for example `powershell.exe -NoProfile -Command "..."`.
+Commands run on the Herdr server. When you attach to a remote server with the
+default `--remote-keybindings=local`, your local keymap's command keys do not
+run there.
 
 ## Theme
 
@@ -302,7 +247,9 @@ The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](
 
 `ui.pane_borders` accepts `"auto"` (the default, borders only for split panes), `"always"` (also frame a single pane), or `"off"`. A single-pane frame requires `ui.pane_outer_borders = true`, because all its edges are outer edges. Existing boolean values remain valid: `true` means `"auto"` and `false` means `"off"`.
 
-Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
+Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. The keymap menu bar temporarily replaces the bottom tab row while a menu or copy mode is open. The default is `"top"`.
+
+`ui.mode_hint_bar` sets what that menu bar shows: `"full"` (the default) lists every key, `"badge"` shows only the menu name, and `"hidden"` draws nothing. A menu's own `bar=` in `keymap.kdl` takes precedence. The copy-mode search prompt and connection errors still appear when the bar is hidden.
 
 Configure an ordered tmux-style status area at the right edge of the tab row:
 
@@ -563,7 +510,7 @@ Restricting `cjk_ime_agents` avoids showing an extra hardware cursor in unrelate
 
 ## Prefix input source switching
 
-On macOS and Windows, Herdr can temporarily switch to an ASCII-capable input source while prefix commands and prefix-launched modes are active:
+On macOS and Windows, Herdr can temporarily switch to an ASCII-capable input source while keymap menus and copy mode are open:
 
 ```toml
 [experimental]
@@ -581,6 +528,7 @@ On Windows, support is currently limited to the Korean IME. With an IME for any 
 | Variable | Purpose |
 | --- | --- |
 | `HERDR_CONFIG_PATH` | Override the config file path. |
+| `HERDR_KEYMAP_PATH` | Override the keymap file path. |
 | `HERDR_SESSION` | Select a named session for CLI commands. |
 | `HERDR_SOCKET_PATH` | Low-level socket path override. |
 | `HERDR_PROCESS_DETECTION` | Linux process detection strategy: `native` (default) or opt-in `child-groups`. |

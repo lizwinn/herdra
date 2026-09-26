@@ -150,25 +150,24 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
-                if action == crate::input::KeybindAction::WorkspacePicker {
-                    self.pending_workspace_highlight = None;
-                    self.mobile_switcher_scroll = 0;
-                    self.reveal_mobile_workspace = false;
-                    self.mode = ClientShellMode::Navigate;
-                    self.navigate_workspace_id = self.focused_navigation_target();
-                    self.reveal_navigation_workspace = true;
-                    outcome.repaint = true;
-                    return;
-                }
-                if action == crate::input::KeybindAction::EnterResizeMode {
-                    self.mode = ClientShellMode::Resize;
-                    outcome.repaint = true;
-                    return;
-                }
-                if action == crate::input::KeybindAction::CopyMode {
-                    if self.enter_copy_mode(outcome) {
-                        outcome.repaint = true;
+                if let crate::input::KeybindAction::WorkspaceList(command) = action {
+                    match command {
+                        crate::input::WorkspaceListCommand::Up => self.move_navigate_workspace(-1),
+                        crate::input::WorkspaceListCommand::Down => self.move_navigate_workspace(1),
+                        crate::input::WorkspaceListCommand::Open => {
+                            self.accept_navigate_workspace(outcome)
+                        }
                     }
+                    outcome.repaint = true;
+                    return;
+                }
+                if let crate::input::KeybindAction::Copy(command) = action {
+                    self.run_copy_command(command, outcome);
+                    return;
+                }
+                if action == crate::input::KeybindAction::WhatsNew {
+                    self.open_release_notes();
+                    outcome.repaint = true;
                     return;
                 }
                 if self.handle_endpoint_navigation(action, outcome) {
@@ -181,20 +180,20 @@ impl ClientShellState {
                 outcome.actions.push(ClientShellAction::Keybind(action));
             }
             crate::input::KeybindMatch::Command(command) => {
-                let action = command.action.into();
-                let resolved_labels = command.bindings.labels();
+                if self.config.keybinding_source == ClientShellKeybindingSource::RemoteLocal
+                    && command.owner == crate::input::keymap::LayerOwner::User
+                {
+                    self.set_endpoint_error(
+                        "keymap commands run only on the machine whose keymap defines them",
+                    );
+                    outcome.repaint = true;
+                    return;
+                }
+                let action: crate::protocol::ClientShellCommandAction = command.spec.kind.into();
                 let command_id = self.snapshot.as_deref().and_then(|snapshot| {
-                    if let Some(candidate) = snapshot.commands.iter().find(|candidate| {
-                        candidate.command_id == command.command && candidate.action == action
-                    }) {
-                        return Some(candidate.command_id.clone());
-                    }
                     let mut candidates = snapshot.commands.iter().filter(|candidate| {
                         candidate.action == action
-                            && !resolved_labels.is_empty()
-                            && resolved_labels
-                                .iter()
-                                .all(|label| candidate.binding_labels.contains(label))
+                            && candidate.binding_labels.contains(&command.path_label)
                     });
                     let candidate = candidates.next()?;
                     candidates
@@ -204,7 +203,7 @@ impl ClientShellState {
                 });
                 let Some(command_id) = command_id else {
                     self.set_endpoint_error(
-                        "custom command is not available on this endpoint; reload configuration",
+                        "command is not available on this endpoint; reload configuration",
                     );
                     outcome.repaint = true;
                     return;

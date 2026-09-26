@@ -5,6 +5,7 @@ pub mod commands;
 pub mod common;
 pub mod events;
 pub mod integrations;
+pub mod keymap;
 pub mod panes;
 pub mod plugins;
 pub mod response;
@@ -19,6 +20,7 @@ pub use commands::*;
 pub use common::*;
 pub use events::*;
 pub use integrations::*;
+pub use keymap::*;
 pub use panes::*;
 pub use plugins::*;
 pub use response::*;
@@ -59,6 +61,8 @@ pub enum Method {
     ServerAgentManifests(EmptyParams),
     #[serde(rename = "server.reload_agent_manifests")]
     ServerReloadAgentManifests(EmptyParams),
+    #[serde(rename = "keymap.get")]
+    KeymapGet(EmptyParams),
     #[serde(rename = "notification.show")]
     NotificationShow(NotificationShowParams),
     #[serde(rename = "product_announcement.dismiss")]

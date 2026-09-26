@@ -494,6 +494,7 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::ServerReloadConfig(_) => "server.reload_config",
         Method::ServerSshAgentRegister(_) => "server.ssh_agent.register",
         Method::ServerAgentManifests(_) => "server.agent_manifests",
+        Method::KeymapGet(_) => "keymap.get",
         Method::ServerReloadAgentManifests(_) => "server.reload_agent_manifests",
         Method::NotificationShow(_) => "notification.show",
         Method::ProductAnnouncementDismiss(_) => "product_announcement.dismiss",

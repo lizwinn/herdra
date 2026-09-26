@@ -1,0 +1,381 @@
+---
+title: Keymap
+description: Every Herdra key lives in one tree of menus defined in keymap.kdl. Build, extend, or replace it.
+---
+
+Every key Herdra handles lives in one tree. The top of the tree is where you type into a pane. The prefix, `ctrl+b` by default, is a chord at that level that opens the main menu. Every menu shows its keys in the bar at the bottom of the window, and any key in a menu either runs an action or opens another menu.
+
+The tree Herdra ships is only a default. It uses the same file format, rules, and actions that you and plugins use, so you can add a key anywhere, move a whole menu, or throw the default away and build your own.
+
+## Where the keymap lives
+
+Herdra reads `keymap.kdl` next to `config.toml`, for example `~/.config/herdr/keymap.kdl`. You only need to write the keys you change; everything else comes from the default tree.
+
+| Setting | Effect |
+| --- | --- |
+| `HERDR_KEYMAP_PATH` | Read the keymap from this path instead. |
+| `[keymap] path` in `config.toml` | Read the keymap from this path. Relative paths start from the config directory. |
+
+Run `herdr keymap path` to print the file Herdra reads. Changes apply after `herdr server reload-config` or the reload key (`ctrl+b s r`).
+
+## How the tree works
+
+A menu opens when you press its key and shows its children in the bottom bar. Keys with a `+` open another menu. Keys drawn in mauve keep the menu open after they run. Press `esc` to close the menus you opened, and `backspace` to go back one menu.
+
+- **Menus close after an action by default.** `ctrl+b t n` opens a new tab and returns you to the pane.
+- **`stay` keeps the menu open after a key runs.** In the default tree, `ctrl+b p h h l` moves focus three times and leaves the pane menu open.
+- **`sticky` menus keep every key open until you press `esc`.** Resize (`ctrl+b p r`) is sticky, so `h h h` resizes three steps.
+- **Mode menus are where `esc` returns to.** Copy mode is a mode: press the prefix inside copy mode, run a command, and you land back in copy mode.
+- **Top-level chords work everywhere.** The prefix reopens the main menu from inside any menu, and prefix-free chords such as `alt+h` work inside copy mode too.
+- **Unknown keys** close a menu, unless it is sticky or sets `unmatched=ignore`. At the top level they go to the pane.
+
+Press `?` in the main menu to list every key in the tree. The list is grouped by menu and filters as you type after `/`.
+
+## Writing keymap.kdl
+
+The file is [KDL](https://kdl.dev). Each line is one key. A line without a block is a leaf that runs something; a line with a block is a menu.
+
+```kdl
+// <chord> <target> [hint] [flags] [properties]
+alt+h pane.focus.left
+prefix {
+    t {
+        c tab.new "create"
+    }
+    g popup "lazygit" width="90%" height="90%"
+    m monitor sticky {
+        j pane.focus.down
+        k pane.focus.up
+    }
+}
+```
+
+**Chords** use the same names as the rest of Herdr: `ctrl+a`, `shift+tab`, `alt+1`, `f5`, `enter`, `home`, `pageup`, and single characters such as `?` or `$`. An uppercase letter means shift: `N` is `shift+n`. Write `1..9` for all nine digits; the digit you press picks the tab, workspace, or agent. Put a chord in quotes when it starts with a digit or contains `[`, `]`, `{`, `}`, `/`, `\`, `#`, `=`, or `;`: `"["`, `"0"`, `"ctrl+/"`. Named keys such as `lbracket`, `slash`, and `semicolon` also work unquoted.
+
+**`prefix`** stands for your prefix chord wherever a chord goes. Top-level chords must not steal typing: a plain letter, digit, `enter`, `tab`, `esc`, `backspace`, or arrow is only allowed inside a menu.
+
+**Leaves** name their target first. The next word, if it is not a flag, is the hint shown in the bar; without one, Herdra uses the action's short label.
+
+| Flag or property | Effect |
+| --- | --- |
+| `exit` | Close the menu after this leaf, even in a sticky menu. |
+| `stay` | Keep the menu open after this leaf. |
+| `hidden` | Keep the key working but leave it out of the bar. |
+| `hint="..."` | Text shown in the bar. |
+| `priority=N` | Higher numbers sort earlier in the bar. |
+| `width=` / `height=` | Popup size, in cells or as a percentage like `"80%"`. |
+
+**Menus** name their title first.
+
+| Flag or property | Effect |
+| --- | --- |
+| `sticky` | Every key stays open until `esc`. |
+| `mode` | `esc` and menu cancels return here. |
+| `view=workspace-list` | Show the workspace list while the menu is open. |
+| `view=copy` | Run copy mode on the focused pane while the menu is open. Copy menus are sticky modes unless you say otherwise. |
+| `unmatched=ignore\|cancel\|forward` | What an unbound key does: nothing, close the menu, or close it and send the key to the pane. |
+| `bar=full\|badge\|hidden` | Show every hint, only the menu title, or no bar. Menus without `bar=` follow `ui.mode_hint_bar` in `config.toml`. |
+| `id=name` | Let `menu.open name` open this menu from anywhere. |
+| `hint="..."` | Text shown in the parent menu's bar. Defaults to the title. |
+| `hidden`, `priority=N` | As for leaves. |
+| `replace` | Drop the default children of this menu instead of adding to them. |
+
+## Changing the default tree
+
+Your file is laid over the default tree by chord path.
+
+- **Add a key** by writing it where you want it: `prefix { t { c tab.new } }` adds `ctrl+b t c`.
+- **Change a key** by writing the same path with a new target.
+- **Remove a key** with the target `none`: `prefix { w { x none } }`.
+- **Replace a whole menu** with `replace`: `prefix herdra replace { ... }`.
+- **Move the prefix** with `base prefix=ctrl+a`.
+- **Start from another tree** with `base classic` for Herdr's one-key layout (`ctrl+b c` for a new tab), or `base none` to build everything yourself.
+
+```kdl
+base classic prefix=ctrl+a
+```
+
+A problem in your file drops only the line it names. `herdr keymap check` and `herdr config check` print every problem with its line number, and the rest of your keymap keeps working.
+
+## Targets
+
+| Target | Does |
+| --- | --- |
+| `menu.back` | Go back one menu. |
+| `menu.cancel` | Close menus down to the nearest mode, or to the pane. |
+| `menu.literal` | Send the chord that opened this menu to the pane. The default tree binds it to the prefix, so pressing the prefix twice sends it through. |
+| `menu.open <id>` | Open the menu declared with `id=<id>`. |
+| `shell "<command>"` | Run a command in the background. |
+| `pane "<command>"` | Run a command in a temporary pane that closes when it exits. |
+| `popup "<command>"` | Run a command in a popup over the session. |
+| `plugin "<plugin.action>"` | Run a plugin action. |
+| `none` | Remove the key. |
+
+Commands run on the Herdra server with the focused workspace, tab, and pane in `HERDR_ACTIVE_*` environment variables. On Windows they run through `cmd.exe /d /c`.
+
+### Workspaces, tabs, and panes
+
+| Action | Does | Bar label |
+| --- | --- | --- |
+| `workspace.new` | New workspace. | new |
+| `workspace.rename` | Rename workspace. | rename |
+| `workspace.close` | Close workspace. | close |
+| `workspace.next` | Next workspace. | next |
+| `workspace.previous` | Previous workspace. | previous |
+| `workspace.switch` | Switch workspace. Needs a `1..9` chord or a single digit. | switch |
+| `workspace.list.up` | Move up the workspace list. | up |
+| `workspace.list.down` | Move down the workspace list. | down |
+| `workspace.list.open` | Open the selected workspace. | open |
+| `worktree.new` | New worktree. | new |
+| `worktree.open` | Open worktree. | open |
+| `worktree.remove` | Delete worktree checkout. | remove |
+| `tab.new` | New tab. | new |
+| `tab.rename` | Rename tab. | rename |
+| `tab.close` | Close tab. | close |
+| `tab.next` | Next tab. | next |
+| `tab.previous` | Previous tab. | previous |
+| `tab.move.left` | Move tab left. | move left |
+| `tab.move.right` | Move tab right. | move right |
+| `tab.switch` | Switch tab. Needs a `1..9` chord or a single digit. | switch |
+| `pane.split.right` | Split pane right. | split right |
+| `pane.split.down` | Split pane down. | split down |
+| `pane.close` | Close pane. | close |
+| `pane.rename` | Rename pane. | rename |
+| `pane.zoom` | Zoom pane. | zoom |
+| `pane.scrollback` | Edit scrollback. | scrollback |
+| `pane.clear` | Clear pane. | clear |
+| `pane.focus.left` | Focus pane left. | focus left |
+| `pane.focus.down` | Focus pane down. | focus down |
+| `pane.focus.up` | Focus pane up. | focus up |
+| `pane.focus.right` | Focus pane right. | focus right |
+| `pane.swap.left` | Swap pane left. | swap left |
+| `pane.swap.down` | Swap pane down. | swap down |
+| `pane.swap.up` | Swap pane up. | swap up |
+| `pane.swap.right` | Swap pane right. | swap right |
+| `pane.cycle.next` | Cycle pane next. | next |
+| `pane.cycle.previous` | Cycle pane previous. | previous |
+| `pane.last` | Last pane. | last |
+| `pane.resize.left` | Resize pane left. | left |
+| `pane.resize.down` | Resize pane down. | down |
+| `pane.resize.up` | Resize pane up. | up |
+| `pane.resize.right` | Resize pane right. | right |
+
+The `workspace.list.*` actions move and open the selection in a menu with `view=workspace-list`.
+
+### Agents and the app
+
+| Action | Does | Bar label |
+| --- | --- | --- |
+| `agent.next` | Next agent. | next |
+| `agent.previous` | Previous agent. | previous |
+| `agent.focus` | Focus agent. Needs a `1..9` chord or a single digit. | focus |
+| `agent.notification` | Open notification target. | notification |
+| `app.help` | Keybinds. | keybinds |
+| `app.settings` | Settings. | settings |
+| `app.reload` | Reload config. | reload |
+| `app.detach` | Detach. | detach |
+| `app.navigator` | Session navigator. | navigator |
+| `app.sidebar` | Toggle sidebar. | sidebar |
+| `app.whats-new` | What's new. | what's new |
+
+### Copy mode
+
+These run inside a menu with `view=copy`.
+
+| Action | Does | Bar label |
+| --- | --- | --- |
+| `copy.move.left` | Move left. | left |
+| `copy.move.down` | Move down. | down |
+| `copy.move.up` | Move up. | up |
+| `copy.move.right` | Move right. | right |
+| `copy.word.next` | Next word start. | word |
+| `copy.word.previous` | Previous word start. | word back |
+| `copy.word.end` | Next word end. | word end |
+| `copy.bigword.next` | Next WORD start. | WORD |
+| `copy.bigword.previous` | Previous WORD start. | WORD back |
+| `copy.bigword.end` | Next WORD end. | WORD end |
+| `copy.paragraph.previous` | Previous paragraph. | paragraph up |
+| `copy.paragraph.next` | Next paragraph. | paragraph down |
+| `copy.line.start` | Start of line. | line start |
+| `copy.line.end` | End of line. | line end |
+| `copy.line.first-nonblank` | First non-blank character. | first char |
+| `copy.history.start` | Start of history. | top |
+| `copy.history.end` | End of history. | bottom |
+| `copy.page.up` | Page up. | page up |
+| `copy.page.down` | Page down. | page down |
+| `copy.halfpage.up` | Half page up. | half page up |
+| `copy.halfpage.down` | Half page down. | half page down |
+| `copy.select` | Start selection. | select |
+| `copy.select.line` | Start line selection. | select line |
+| `copy.search.forward` | Search forward. | search |
+| `copy.search.backward` | Search backward. | search back |
+| `copy.search.next` | Repeat search. | repeat |
+| `copy.search.reverse` | Repeat search in reverse. | reverse |
+| `copy.yank` | Copy selection and exit. | copy |
+| `copy.exit` | Exit copy mode. | exit |
+| `copy.escape` | Clear selection or search, else exit. | clear |
+
+`copy.yank`, `copy.exit`, and `copy.escape` close copy mode themselves when they finish, as does `workspace.list.open` for the workspace list.
+
+## The default tree
+
+`herdr keymap default` prints it, and `herdr keymap default classic` prints the classic layout.
+
+```kdl
+// Herdra's default keymap.
+//
+// Each top-level node is a chord you press while typing in a pane. A node
+// with a block is a menu: its first word is its title, and its children are
+// the keys that work while it is open. Any other node is a leaf that runs an
+// action. `prefix` stands for the prefix chord (ctrl+b unless you set
+// `base prefix=...` in your own keymap.kdl).
+//
+// Menus close after a leaf runs. Leaves marked `stay` keep the menu open, and
+// `sticky` menus keep every leaf open until you press esc. esc cancels,
+// backspace goes back one menu.
+
+prefix herdra id=herdra {
+    prefix menu.literal
+    "?" app.help
+    g app.navigator
+    b app.sidebar
+
+    w workspace view=workspace-list unmatched=ignore {
+        j workspace.list.down move stay
+        k workspace.list.up move stay
+        down workspace.list.down hidden stay
+        up workspace.list.up hidden stay
+        enter workspace.list.open
+        n workspace.new
+        r workspace.rename
+        x workspace.close
+        "[" workspace.previous cycle stay
+        "]" workspace.next cycle stay
+        "1..9" workspace.switch
+        t worktree {
+            n worktree.new
+            o worktree.open
+            d worktree.remove
+        }
+    }
+
+    t tab {
+        n tab.new
+        r tab.rename
+        x tab.close
+        "[" tab.previous cycle stay
+        "]" tab.next cycle stay
+        h tab.move.left move stay
+        l tab.move.right move stay
+        "1..9" tab.switch
+    }
+
+    p pane {
+        h pane.focus.left focus stay
+        j pane.focus.down focus stay
+        k pane.focus.up focus stay
+        l pane.focus.right focus stay
+        H pane.swap.left swap stay
+        J pane.swap.down swap stay
+        K pane.swap.up swap stay
+        L pane.swap.right swap stay
+        tab pane.cycle.next stay
+        shift+tab pane.cycle.previous hidden stay
+        o pane.last
+        v pane.split.right
+        "-" pane.split.down
+        x pane.close
+        z pane.zoom
+        n pane.rename
+        e pane.scrollback
+        c pane.clear
+
+        r resize sticky id=resize {
+            h pane.resize.left resize
+            j pane.resize.down resize
+            k pane.resize.up resize
+            l pane.resize.right resize
+            left pane.resize.left hidden
+            down pane.resize.down hidden
+            up pane.resize.up hidden
+            right pane.resize.right hidden
+            enter menu.cancel done
+        }
+
+        y copy mode view=copy id=copy {
+            h copy.move.left move
+            j copy.move.down move
+            k copy.move.up move
+            l copy.move.right move
+            left copy.move.left hidden
+            down copy.move.down hidden
+            up copy.move.up hidden
+            right copy.move.right hidden
+            w copy.word.next hidden
+            b copy.word.previous hidden
+            e copy.word.end hidden
+            W copy.bigword.next hidden
+            B copy.bigword.previous hidden
+            E copy.bigword.end hidden
+            "{" copy.paragraph.previous hidden
+            "}" copy.paragraph.next hidden
+            "0" copy.line.start hidden
+            home copy.line.start hidden
+            "$" copy.line.end hidden
+            end copy.line.end hidden
+            "^" copy.line.first-nonblank hidden
+            g copy.history.start hidden
+            G copy.history.end hidden
+            pageup copy.page.up hidden
+            pagedown copy.page.down hidden
+            ctrl+f copy.page.down hidden
+            ctrl+u copy.halfpage.up hidden
+            ctrl+d copy.halfpage.down hidden
+            "/" copy.search.forward
+            "?" copy.search.backward hidden
+            n copy.search.next
+            N copy.search.reverse hidden
+            v copy.select
+            space copy.select hidden
+            V copy.select.line hidden
+            y copy.yank
+            enter copy.yank hidden
+            q copy.exit
+            esc copy.escape
+        }
+    }
+
+    a agent {
+        n agent.next cycle stay
+        p agent.previous cycle stay
+        o agent.notification
+        "1..9" agent.focus
+    }
+
+    s session {
+        s app.settings
+        r app.reload
+        d app.detach
+        w app.whats-new
+    }
+}
+```
+
+## Plugin menus
+
+Plugins can ship their own `keymap.kdl` that adds keys and menus to this tree. Herdra layers plugin trees over the default tree in plugin id order, then applies your file, so you can move or remove any plugin key. A plugin cannot take a key that is already bound. See [Plugins](/docs/plugins/#keymap).
+
+## Keymap commands
+
+| Command | Does |
+| --- | --- |
+| `herdr keymap print [--json]` | Show the effective tree, including where each key came from. It asks the running server, so plugin menus appear; with no server running it reads your files. |
+| `herdr keymap default [herdra\|classic]` | Print a built-in tree. |
+| `herdr keymap check [FILE]` | Check a keymap file and print problems with line numbers. |
+| `herdr keymap path` | Print where Herdra reads `keymap.kdl`. |
+| `herdr keymap migrate [--dry-run]` | Convert `[keys]` in `config.toml` into `keymap.kdl`. |
+| `herdr keymap reset` | Move `keymap.kdl` aside so the default tree applies. |
+
+## Migrating from [keys]
+
+Herdra no longer reads the `[keys]` table, `[[keys.command]]`, or `[keys.indexed]` in `config.toml`. `herdr config check` reports them. Run `herdr keymap migrate` to convert them: it writes a `keymap.kdl` that starts from `base classic` and applies your changes, backs up `config.toml`, and removes `[keys]` from it. `keys.remote_image_paste` moves to `[remote] image_paste_key`. Use `--dry-run` to print the result without writing anything.

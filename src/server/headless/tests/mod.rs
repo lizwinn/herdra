@@ -16,7 +16,7 @@ fn client_shell_projection(
     Box<protocol::ClientShellSnapshot>,
     protocol::endpoint::EndpointAgentCompletions,
 ) {
-    let read_control = |expected| {
+    let read_control = |expected| loop {
         let ServerMessage::EndpointControl { kind, data } = read_server_message(
             receiver
                 .recv_timeout(Duration::from_secs(1))
@@ -24,8 +24,11 @@ fn client_shell_projection(
         ) else {
             panic!("expected endpoint control {expected}");
         };
+        if kind == protocol::endpoint::KEYMAP_PROJECTION_KIND {
+            continue;
+        }
         assert_eq!(kind, expected);
-        data
+        break data;
     };
     let completions: protocol::endpoint::EndpointAgentCompletions =
         serde_json::from_str(&read_control(protocol::endpoint::AGENT_COMPLETIONS_KIND)).unwrap();
@@ -90,7 +93,6 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
     let should_quit = Arc::new(AtomicBool::new(false));
     #[cfg(windows)]
     spawn_windows_client_accept_thread(listener, should_quit.clone(), server_event_tx.clone());
-    let server_keybindings = app_keybindings(&app);
     let headless_size = app.state.headless_size;
 
     HeadlessServer {
@@ -112,7 +114,6 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
         client_shell_boot_id: "test-boot".into(),
         sent_window_title: None,
         api_window_title: None,
-        server_keybindings,
         server_config_diagnostic: None,
         server_config_diagnostic_without_keybindings: None,
         terminal_attach_owners: HashMap::new(),

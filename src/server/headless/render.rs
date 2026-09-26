@@ -562,6 +562,37 @@ impl HeadlessServer {
                 let Some(client) = self.clients.get_mut(&client_id) else {
                     continue;
                 };
+                if client.shell_keymap_revision != self.app.keymap_revision
+                    && !self.app.keymap_projection_needed(
+                        client.shell_uses_endpoint_keybindings,
+                        client.shell_keymap_sent,
+                    )
+                {
+                    client.shell_keymap_revision = self.app.keymap_revision;
+                }
+                if client.shell_keymap_revision != self.app.keymap_revision {
+                    let projection = self.app.keymap_projection(&self.client_shell_boot_id);
+                    let framed = crate::protocol::endpoint::keymap_projection_message(&projection)
+                        .map_err(std::io::Error::other)
+                        .and_then(|message| {
+                            Self::frame_server_message(&message).map_err(std::io::Error::other)
+                        });
+                    let sent = match (framed, client.writer.as_ref()) {
+                        (Ok(framed), Some(writer)) => writer.control.send(framed).is_ok(),
+                        (Err(err), _) => {
+                            warn!(client_id, err = %err, "failed to frame endpoint keymap");
+                            false
+                        }
+                        (Ok(_), None) => false,
+                    };
+                    if !sent {
+                        broken_clients.push(client_id);
+                        continue;
+                    }
+                    client.shell_keymap_revision = self.app.keymap_revision;
+                    client.shell_keymap_sent =
+                        !projection.plugins.is_empty() || projection.server_keymap.is_some();
+                }
                 let (mut candidate, mut completions) = client_shell_snapshot(
                     &self.app,
                     &self.client_shell_boot_id,

@@ -29,8 +29,8 @@ plugins portable across Unix sockets and Windows named pipes. Use the
 [socket API](/docs/socket-api/) when you want to send raw JSON requests yourself.
 
 Runtime action registration and native non-terminal plugin UI are not part of
-plugin v1. Actions, event hooks, panes, and link handlers are all declared in
-the manifest.
+plugin v1. Actions, event hooks, panes, link handlers, and keymap menus are all
+declared in the manifest.
 
 ## Trust and security
 
@@ -64,6 +64,7 @@ version = "0.1.0"
 min_herdr_version = "0.7.0"
 description = "Apply project layouts"
 platforms = ["linux", "macos", "windows"]
+keymap = "keymap.kdl"
 
 [[build]]
 command = ["npm", "ci"]
@@ -102,8 +103,8 @@ Top-level `id`, `name`, `version`, and `min_herdr_version` are required.
 Set `min_herdr_version` to the oldest Herdr version that supports the plugin
 APIs, event names, and manifest fields your plugin uses. Herdr refuses to link
 or install a plugin when its minimum version is newer than the current binary.
-`description` is optional. Plugin ids may use ASCII letters, digits, dot,
-colon, underscore, and hyphen.
+`description` and `keymap` are optional. Plugin ids may use ASCII letters,
+digits, dot, colon, underscore, and hyphen.
 
 Action ids, pane ids, and link handler ids are local ids inside the plugin.
 They may use ASCII letters, digits, colon, underscore, and hyphen, but not
@@ -328,16 +329,46 @@ On Windows, build commands, action commands, and event commands resolve common
 command is on `PATH`. Pane commands use Herdr's normal Windows pane launcher and
 must still be valid Windows argv commands.
 
-## Keybindings
+## Keymap
 
-Bind a key to an installed plugin action:
+A plugin can add keys and menus to the [keymap tree](/docs/keymap/). Point the
+manifest's `keymap` at a KDL file inside the plugin:
 
-```toml
-[[keys.command]]
-key = "prefix+l"
-type = "plugin_action"
-command = "example.layout.apply"
-description = "apply layout"
+```kdl
+// keymap.kdl
+prefix {
+    p {
+        L plugin apply "layout"   // ctrl+b p L applies the layout
+    }
+    x layouts sticky {             // ctrl+b x opens the plugin's own menu
+        a plugin apply
+        r plugin reset
+        z pane.zoom
+    }
+}
+```
+
+The file uses the same format and actions as a user's `keymap.kdl`. Inside a
+plugin keymap, a bare action id like `plugin apply` means this plugin's own
+action. Herdr adds plugin keymaps on top of the default tree in plugin id order,
+then applies the user's `keymap.kdl`, so users can always move or remove a
+plugin's keys.
+
+A plugin can add keys to any menu and create its own menus, but it cannot take
+a key that is already bound: Herdr keeps the existing binding and reports the
+conflict in `herdr plugin list` warnings and `herdr keymap print`. A keymap
+path outside the plugin directory, a missing file, or a file that is not valid
+KDL stops the plugin from linking. Keys that name unknown actions are dropped
+with a warning. When the plugin is disabled or unlinked, its keys disappear.
+
+The keys work in every Herdr client attached to the server, including remote
+attach: the server sends each client its plugins' keymaps. Users can also bind
+a plugin action themselves from their own `keymap.kdl`:
+
+```kdl
+prefix {
+    l plugin "example.layout.apply" "apply layout"
+}
 ```
 
 ## Link handlers

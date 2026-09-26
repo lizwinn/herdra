@@ -2017,6 +2017,12 @@ async fn run_client_loop(
                                 }
                                 continue;
                             }
+                            Ok(endpoint::EndpointControlMessage::KeymapProjection(projection)) => {
+                                if let Some(shell) = state.shell.as_mut() {
+                                    shell.set_endpoint_keymap_projection(&endpoint_id, projection);
+                                }
+                                continue;
+                            }
                             Ok(endpoint::EndpointControlMessage::AgentCompletions(projection)) => {
                                 if let Some(shell) = state.shell.as_mut() {
                                     shell.set_endpoint_agent_completions(

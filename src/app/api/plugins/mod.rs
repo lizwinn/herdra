@@ -34,6 +34,11 @@ impl App {
             .into_iter()
             .map(|plugin| (plugin.plugin_id.clone(), plugin))
             .collect();
+        let plugin_keymaps = collect_plugin_keymaps(&self.state.installed_plugins);
+        if plugin_keymaps != self.plugin_keymaps {
+            self.plugin_keymaps = plugin_keymaps;
+            self.rebuild_keymap();
+        }
     }
 
     fn refresh_installed_plugins(&mut self) -> std::io::Result<()> {
@@ -767,6 +772,34 @@ fn normalize_optional_plugin_id(
     }
 }
 
+/// Keymap trees from enabled plugins whose manifests load, sorted by id.
+pub(crate) fn collect_plugin_keymaps(
+    plugins: &crate::app::state::InstalledPluginRegistry,
+) -> Vec<(String, crate::input::keymap::KeymapText)> {
+    let mut keymaps = plugins
+        .values()
+        .filter(|plugin| plugin.enabled && plugin_manifest_available(plugin))
+        .filter_map(|plugin| {
+            let relative = plugin.keymap.as_deref()?;
+            let path = std::path::Path::new(&plugin.plugin_root).join(relative);
+            let text = std::fs::read_to_string(path)
+                .map_err(|err| {
+                    tracing::warn!(plugin = %plugin.plugin_id, err = %err, "plugin keymap unreadable");
+                })
+                .ok()?;
+            Some((
+                plugin.plugin_id.clone(),
+                crate::input::keymap::KeymapText {
+                    source: format!("{}/{relative}", plugin.plugin_id),
+                    text,
+                },
+            ))
+        })
+        .collect::<Vec<_>>();
+    keymaps.sort_by(|left, right| left.0.cmp(&right.0));
+    keymaps
+}
+
 fn plugin_manifest_available(plugin: &InstalledPluginInfo) -> bool {
     !plugin.warnings.iter().any(|warning| {
         warning.starts_with(crate::persist::plugin_registry::MANIFEST_UNAVAILABLE_WARNING_PREFIX)
@@ -1170,6 +1203,120 @@ command = ["awk", "-F", "\t", " {print $1} "]
     }
 
     #[test]
+    fn plugin_keymaps_join_the_server_keymap_and_reach_clients() {
+        let root = unique_temp_path("plugin-keymap");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.layout"
+name = "Layout"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+keymap = "keymap.kdl"
+
+[[actions]]
+id = "apply"
+title = "Apply layout"
+command = ["true"]
+"#,
+        );
+        std::fs::write(
+            root.join("keymap.kdl"),
+            "prefix {\n  p {\n    g plugin apply layout\n    v plugin apply\n    q tab.nwe\n  }\n}\n",
+        )
+        .unwrap();
+
+        let plugin =
+            load_plugin_manifest(&root.display().to_string(), true).expect("plugin keymap loads");
+        assert_eq!(plugin.keymap.as_deref(), Some("keymap.kdl"));
+        assert!(
+            plugin
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("v is already bound by builtin")),
+            "{:?}",
+            plugin.warnings
+        );
+        assert!(
+            plugin
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("unknown action")),
+            "{:?}",
+            plugin.warnings
+        );
+
+        let mut app = test_app();
+        let previous_revision = app.keymap_revision;
+        app.replace_installed_plugins(vec![plugin.clone()]);
+        assert!(app.keymap_revision > previous_revision);
+        let pane_menu = app.keymap.menu_by_path("ctrl+b p").expect("pane menu");
+        assert!(app
+            .keymap
+            .menu(pane_menu)
+            .bindings
+            .iter()
+            .any(|binding| binding.hint == "layout"));
+        assert!(app
+            .client_shell_command_manifest()
+            .iter()
+            .any(|command| command.binding_labels == ["ctrl+b p g"]
+                && command.action == crate::protocol::ClientShellCommandAction::PluginAction));
+        let projection = app.keymap_projection("boot");
+        assert_eq!(projection.plugins.len(), 1);
+        assert_eq!(projection.plugins[0].plugin_id, "example.layout");
+
+        let revision = app.keymap_revision;
+        app.replace_installed_plugins(vec![plugin.clone()]);
+        assert_eq!(
+            app.keymap_revision, revision,
+            "unchanged plugins keep the keymap"
+        );
+
+        let mut disabled = plugin;
+        disabled.enabled = false;
+        app.replace_installed_plugins(vec![disabled]);
+        assert!(app.keymap_revision > revision);
+        assert!(app.keymap_projection("boot").plugins.is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_keymap_must_be_readable_kdl_inside_the_plugin() {
+        for (name, keymap, contents) in [
+            ("escape", "../keymap.kdl", None),
+            ("missing", "keymap.kdl", None),
+            ("broken", "keymap.kdl", Some("prefix {")),
+        ] {
+            let root = unique_temp_path(&format!("plugin-keymap-{name}"));
+            write_manifest_content(
+                &root,
+                &format!(
+                    r#"
+id = "example.keymap-{name}"
+name = "Keymap {name}"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+keymap = "{keymap}"
+"#
+                ),
+            );
+            if let Some(contents) = contents {
+                std::fs::write(root.join("keymap.kdl"), contents).unwrap();
+            }
+            let result = load_plugin_manifest(&root.display().to_string(), true);
+            assert!(
+                matches!(result, Err(("invalid_plugin_keymap", _))),
+                "{name}: {result:?}"
+            );
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
     fn plugin_manifest_rejects_empty_command_elements() {
         for (name, command) in [("array", "[]"), ("element", r#"["echo", ""]"#)] {
             let root = unique_temp_path(&format!("plugin-empty-command-{name}"));
@@ -1457,7 +1604,8 @@ platforms = ["linux", "macos"]
         assert_eq!(plugin.actions.len(), 1);
         assert_eq!(plugin.events.len(), 1);
         assert_eq!(plugin.panes.len(), 1);
-        assert!(plugin.warnings.is_empty());
+        assert_eq!(plugin.keymap.as_deref(), Some("keymap.kdl"));
+        assert!(plugin.warnings.is_empty(), "{:?}", plugin.warnings);
     }
 
     #[test]

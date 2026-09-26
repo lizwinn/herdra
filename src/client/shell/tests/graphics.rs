@@ -68,7 +68,7 @@ fn add_main_image(
 fn failed_direct_ack_composition_restores_graphics_for_inline_retry() {
     use crate::kitty_graphics::surface::host_image_id;
 
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     let mut pane = surface();
     let (mut asset, mut placement) = image(
@@ -146,8 +146,7 @@ fn notifications_and_clipboard_feedback_only_cover_their_drawn_corners() {
             Toast::BottomLeft,
             Toast::BottomRight,
         ] {
-            let mut state =
-                ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+            let mut state = ClientShellState::new(test_shell_config(&Config::default()));
             state.sidebar_collapsed = true;
             state.set_snapshot(Box::new(snapshot()));
             state.set_pane_surface(surface());
@@ -178,8 +177,7 @@ fn notifications_and_clipboard_feedback_only_cover_their_drawn_corners() {
             Clipboard::BottomCenter,
             Clipboard::BottomRight,
         ] {
-            let mut state =
-                ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+            let mut state = ClientShellState::new(test_shell_config(&Config::default()));
             state.sidebar_collapsed = true;
             state.config.clipboard_toast_position = position;
             state.set_snapshot(Box::new(snapshot()));
@@ -209,7 +207,7 @@ fn notifications_and_clipboard_feedback_only_cover_their_drawn_corners() {
 
 #[test]
 fn endpoint_notice_and_multiline_diagnostic_cover_the_actual_rows() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.visible_endpoint_notice = Some(ClientVisibleEndpointNotice {
@@ -232,7 +230,7 @@ fn endpoint_notice_and_multiline_diagnostic_cover_the_actual_rows() {
 
 #[test]
 fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
-    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    let palette = test_shell_config(&Config::default()).palette;
     let overlays = vec![
         ClientShellOverlay::Onboarding,
         ClientShellOverlay::ProductAnnouncement(crate::app::state::ProductAnnouncementState {
@@ -320,7 +318,7 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
         }),
     ];
     for overlay in overlays {
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        let mut state = ClientShellState::new(test_shell_config(&Config::default()));
         state.set_snapshot(Box::new(snapshot()));
         state.set_pane_surface(surface());
         state.compose(106, 40).unwrap();
@@ -344,7 +342,7 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
                 snapshot,
                 &state.endpoints,
                 &state.active_endpoint_id,
-                &state.config.keybinds,
+                &state.config.keymap,
                 &state.config.palette,
             ),
         }
@@ -406,7 +404,7 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
 
 #[test]
 fn selection_copy_cursor_and_search_hide_only_the_highlighted_images() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     let layout = state.layout(106, 20);
     let mut surface = surface();
@@ -463,7 +461,7 @@ fn selection_copy_cursor_and_search_hide_only_the_highlighted_images() {
 
 #[test]
 fn mobile_switcher_still_hides_the_entire_underlying_surface() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     let layout = state.layout(40, 24);
     let point = (layout.pane_surface.x, layout.pane_surface.y);
@@ -475,7 +473,7 @@ fn mobile_switcher_still_hides_the_entire_underlying_surface() {
         &frame.graphics.clone().into_inline_bytes(),
         point
     ));
-    state.mode = ClientShellMode::Navigate;
+    state.set_mode_name("navigate");
     let frame = state.compose(40, 24).unwrap();
     assert!(!is_placed(
         &frame.graphics.clone().into_inline_bytes(),
@@ -495,7 +493,7 @@ fn mobile_switcher_still_hides_the_entire_underlying_surface() {
 
 #[test]
 fn popup_terminal_keeps_own_graphics_and_hides_only_background_overlap() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut state = ClientShellState::new(test_shell_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface_with_popup());
     state.compose(106, 20).unwrap();

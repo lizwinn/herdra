@@ -31,6 +31,40 @@ pub const AGENT_VIEW_PROJECTION_CAPABILITY: &str = "agent_view_projection";
 pub const AGENT_VIEW_PROJECTION_KIND: &str = "endpoint.agent-view.v1";
 pub const AGENT_COMPLETIONS_CAPABILITY: &str = "agent_completions";
 pub const AGENT_COMPLETIONS_KIND: &str = "endpoint.agent-completions.v1";
+pub const KEYMAP_PROJECTION_CAPABILITY: &str = "keymap_projection";
+pub const KEYMAP_PROJECTION_KIND: &str = "endpoint.keymap.v1";
+
+/// Optional companion control: the keymap layers a server contributes, so
+/// clients resolve keys with the server's plugin menus. Clients that do not
+/// know this kind ignore it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointKeymapProjection {
+    pub boot_id: String,
+    pub revision: u64,
+    /// Keymap trees from the server's enabled plugins.
+    #[serde(default)]
+    pub plugins: Vec<EndpointKeymapLayer>,
+    /// The server's own keymap file with command text removed, for clients
+    /// that use the server's keymap.
+    #[serde(default)]
+    pub server_keymap: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointKeymapLayer {
+    pub plugin_id: String,
+    pub source: String,
+    pub text: String,
+}
+
+pub fn keymap_projection_message(
+    projection: &EndpointKeymapProjection,
+) -> serde_json::Result<ServerMessage> {
+    Ok(ServerMessage::EndpointControl {
+        kind: KEYMAP_PROJECTION_KIND.into(),
+        data: serde_json::to_string(projection)?,
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EndpointAgentCompletions {
@@ -170,6 +204,7 @@ impl EndpointServerWelcome {
                 HEALTH_CHECK_CAPABILITY.into(),
                 AGENT_VIEW_PROJECTION_CAPABILITY.into(),
                 AGENT_COMPLETIONS_CAPABILITY.into(),
+                KEYMAP_PROJECTION_CAPABILITY.into(),
             ],
             error: None,
         }
@@ -377,8 +412,35 @@ mod tests {
                 HEALTH_CHECK_CAPABILITY.to_string(),
                 AGENT_VIEW_PROJECTION_CAPABILITY.to_string(),
                 AGENT_COMPLETIONS_CAPABILITY.to_string(),
+                KEYMAP_PROJECTION_CAPABILITY.to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn keymap_projection_is_an_optional_control() {
+        let projection = EndpointKeymapProjection {
+            boot_id: "boot".into(),
+            revision: 3,
+            plugins: vec![EndpointKeymapLayer {
+                plugin_id: "example.layout".into(),
+                source: "example.layout/keymap.kdl".into(),
+                text: "prefix { L plugin apply }".into(),
+            }],
+            server_keymap: None,
+        };
+        let ServerMessage::EndpointControl { kind, data } =
+            keymap_projection_message(&projection).unwrap()
+        else {
+            panic!("keymap projection is an endpoint control");
+        };
+        assert_eq!(kind, KEYMAP_PROJECTION_KIND);
+        let decoded: EndpointKeymapProjection = serde_json::from_str(&data).unwrap();
+        assert_eq!(decoded, projection);
+        let minimal: EndpointKeymapProjection =
+            serde_json::from_str(r#"{"boot_id":"boot","revision":1}"#).unwrap();
+        assert!(minimal.plugins.is_empty());
+        assert_eq!(minimal.server_keymap, None);
     }
 
     #[test]

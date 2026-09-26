@@ -679,6 +679,7 @@ mod tests {
                 }],
                 panes: Vec::new(),
                 link_handlers: Vec::new(),
+                keymap: None,
                 source: crate::api::schema::PluginSourceInfo::default(),
                 warnings: Vec::new(),
             },

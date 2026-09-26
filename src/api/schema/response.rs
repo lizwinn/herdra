@@ -6,6 +6,7 @@ use super::events::EventEnvelope;
 use super::integrations::{
     IntegrationInstallResult, IntegrationTarget, IntegrationUninstallResult,
 };
+use super::keymap::KeymapInfo;
 use super::panes::{
     LayoutDescription, PaneEdgesResult, PaneFocusDirectionResult, PaneInfo, PaneLayoutSnapshot,
     PaneMoveResult, PaneNeighborResult, PaneProcessInfo, PaneReadResult, PaneResizeResult,
@@ -215,6 +216,9 @@ pub enum ResponseResult {
     },
     AgentManifestReload {
         manifests: Vec<AgentManifestInfo>,
+    },
+    Keymap {
+        keymap: KeymapInfo,
     },
     AgentManifestStatus {
         #[serde(default, skip_serializing_if = "Option::is_none")]

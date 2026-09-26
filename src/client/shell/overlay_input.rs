@@ -87,7 +87,7 @@ impl ClientShellState {
         {
             ClientShellMode::Terminal
         } else {
-            ClientShellMode::Navigate
+            self.workspace_list_mode()
         };
         self.push_endpoint_method_with_kind(
             crate::api::schema::Method::ReleaseNotesDismiss(
@@ -880,7 +880,7 @@ impl ClientShellState {
                 self.accept_close_confirmation(outcome);
             } else if key.code == KeyCode::Esc {
                 self.overlay = None;
-                self.mode = ClientShellMode::Navigate;
+                self.mode = self.workspace_list_mode();
                 self.navigate_workspace_id = self.focused_navigation_target();
                 self.reveal_navigation_workspace = true;
                 outcome.repaint = true;

@@ -438,7 +438,7 @@ mod tests {
     fn machine_commands_reject_local_side_effects_and_tui_attach() {
         for command in [
             &["update"][..],
-            &["config", "reset-keys"],
+            &["keymap", "reset"],
             &["machine", "remove", "mac"],
             &["session", "delete", "default"],
             &["server", "live-handoff"],

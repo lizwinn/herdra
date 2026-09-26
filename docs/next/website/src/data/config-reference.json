@@ -472,386 +472,20 @@
       ]
     },
     {
-      "id": "keys",
-      "title": "Keybindings",
+      "id": "keymap",
+      "title": "Keymap",
       "keys": [
         {
-          "key": "keys.prefix",
+          "key": "keymap.path",
           "type": "string",
-          "default": "\"ctrl+b\"",
-          "description": "Prefix key to enter prefix mode (e.g. \"ctrl+b\", \"f12\", \"esc\")."
+          "default": "\"keymap.kdl\"",
+          "description": "Path to the keymap file that defines every key. Relative paths start from the config directory. `HERDR_KEYMAP_PATH` overrides it. See [Keymap](/docs/keymap/)."
         },
         {
-          "key": "keys.help",
-          "type": "keybinding",
-          "default": "\"prefix+?\"",
-          "description": "Open keybinding help."
-        },
-        {
-          "key": "keys.settings",
-          "type": "keybinding",
-          "default": "\"prefix+s\"",
-          "description": "Open settings."
-        },
-        {
-          "key": "keys.new_workspace",
-          "type": "keybinding",
-          "default": "\"prefix+shift+n\"",
-          "description": "Create a new workspace."
-        },
-        {
-          "key": "keys.new_worktree",
-          "type": "keybinding",
-          "default": "\"prefix+shift+g\"",
-          "description": "Create a Git worktree from the selected workspace."
-        },
-        {
-          "key": "keys.open_worktree",
-          "type": "keybinding",
+          "key": "keys",
+          "type": "table",
           "default": "unset",
-          "description": "Open an existing Git worktree from the selected workspace. Unset by default."
-        },
-        {
-          "key": "keys.remove_worktree",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Delete the selected managed worktree checkout after confirmation. Unset by default."
-        },
-        {
-          "key": "keys.rename_workspace",
-          "type": "keybinding",
-          "default": "\"prefix+shift+w\"",
-          "description": "Rename the selected workspace."
-        },
-        {
-          "key": "keys.close_workspace",
-          "type": "keybinding",
-          "default": "\"prefix+shift+d\"",
-          "description": "Close the selected workspace."
-        },
-        {
-          "key": "keys.workspace_picker",
-          "type": "keybinding",
-          "default": "\"prefix+w\"",
-          "description": "Open the workspace navigation surface."
-        },
-        {
-          "key": "keys.goto",
-          "type": "keybinding",
-          "default": "\"prefix+g\"",
-          "description": "Open the session navigator."
-        },
-        {
-          "key": "keys.navigate_workspace_up",
-          "type": "keybinding",
-          "default": "\"up\"",
-          "description": "Move workspace selection up in navigate mode."
-        },
-        {
-          "key": "keys.navigate_workspace_down",
-          "type": "keybinding",
-          "default": "\"down\"",
-          "description": "Move workspace selection down in navigate mode."
-        },
-        {
-          "key": "keys.navigate_pane_left",
-          "type": "keybinding",
-          "default": "\"h\"",
-          "description": "Focus the pane to the left in navigate mode. Left arrow is always an alias."
-        },
-        {
-          "key": "keys.navigate_pane_down",
-          "type": "keybinding",
-          "default": "\"j\"",
-          "description": "Focus the pane below in navigate mode."
-        },
-        {
-          "key": "keys.navigate_pane_up",
-          "type": "keybinding",
-          "default": "\"k\"",
-          "description": "Focus the pane above in navigate mode."
-        },
-        {
-          "key": "keys.navigate_pane_right",
-          "type": "keybinding",
-          "default": "\"l\"",
-          "description": "Focus the pane to the right in navigate mode. Right arrow is always an alias."
-        },
-        {
-          "key": "keys.detach",
-          "type": "keybinding",
-          "default": "\"prefix+q\"",
-          "description": "Detach the current client from its Herdr server."
-        },
-        {
-          "key": "keys.reload_config",
-          "type": "keybinding",
-          "default": "\"prefix+shift+r\"",
-          "description": "Reload config.toml in the running app/server."
-        },
-        {
-          "key": "keys.open_notification_target",
-          "type": "keybinding",
-          "default": "\"prefix+o\"",
-          "description": "Focus the currently visible notification target."
-        },
-        {
-          "key": "keys.previous_workspace",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Select the previous workspace. Unset by default."
-        },
-        {
-          "key": "keys.next_workspace",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Select the next workspace. Unset by default."
-        },
-        {
-          "key": "keys.previous_agent",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Focus the previous agent shown in the agent panel. Unset by default."
-        },
-        {
-          "key": "keys.next_agent",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Focus the next agent shown in the agent panel. Unset by default."
-        },
-        {
-          "key": "keys.focus_agent",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Focus an agent by index 1-9. Unset by default."
-        },
-        {
-          "key": "keys.remote_image_paste",
-          "type": "string",
-          "default": "\"ctrl+v\"",
-          "description": "Local-client shortcut that sends a clipboard image to a remote Herdr session."
-        },
-        {
-          "key": "keys.new_tab",
-          "type": "keybinding",
-          "default": "\"prefix+c\"",
-          "description": "Create a new tab in the active workspace."
-        },
-        {
-          "key": "keys.rename_tab",
-          "type": "keybinding",
-          "default": "\"prefix+shift+t\"",
-          "description": "Rename the active tab."
-        },
-        {
-          "key": "keys.previous_tab",
-          "type": "keybinding",
-          "default": "\"prefix+p\"",
-          "description": "Select the previous tab."
-        },
-        {
-          "key": "keys.next_tab",
-          "type": "keybinding",
-          "default": "\"prefix+n\"",
-          "description": "Select the next tab."
-        },
-        {
-          "key": "keys.move_tab_previous",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Move the active tab one position toward the front. Unset by default."
-        },
-        {
-          "key": "keys.move_tab_next",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Move the active tab one position toward the back. Unset by default."
-        },
-        {
-          "key": "keys.switch_tab",
-          "type": "keybinding",
-          "default": "\"prefix+1..9\"",
-          "description": "Switch to tab 1-9."
-        },
-        {
-          "key": "keys.switch_workspace",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Switch to workspace 1-9 from prefix mode. Unset by default."
-        },
-        {
-          "key": "keys.close_tab",
-          "type": "keybinding",
-          "default": "\"prefix+shift+x\"",
-          "description": "Close the active tab."
-        },
-        {
-          "key": "keys.rename_pane",
-          "type": "keybinding",
-          "default": "\"prefix+shift+p\"",
-          "description": "Rename the focused pane."
-        },
-        {
-          "key": "keys.edit_scrollback",
-          "type": "keybinding",
-          "default": "\"prefix+e\"",
-          "description": "Open the focused pane scrollback in $EDITOR."
-        },
-        {
-          "key": "keys.clear_pane",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Clear the focused pane screen and scrollback, keeping the current cursor line and its visible soft-wrapped rows. Sends no input to the running program and does nothing on the alternate screen (for example, Vim). Unset by default; for example, clear_pane = \"prefix+ctrl+k\"."
-        },
-        {
-          "key": "keys.copy_mode",
-          "type": "keybinding",
-          "default": "\"prefix+[\"",
-          "description": "Enter keyboard copy mode for the focused pane."
-        },
-        {
-          "key": "keys.focus_pane_left",
-          "type": "keybinding",
-          "default": "\"prefix+h\"",
-          "description": "Focus the pane to the left."
-        },
-        {
-          "key": "keys.focus_pane_down",
-          "type": "keybinding",
-          "default": "\"prefix+j\"",
-          "description": "Focus the pane below."
-        },
-        {
-          "key": "keys.focus_pane_up",
-          "type": "keybinding",
-          "default": "\"prefix+k\"",
-          "description": "Focus the pane above."
-        },
-        {
-          "key": "keys.focus_pane_right",
-          "type": "keybinding",
-          "default": "\"prefix+l\"",
-          "description": "Focus the pane to the right."
-        },
-        {
-          "key": "keys.swap_pane_left",
-          "type": "keybinding",
-          "default": "\"prefix+shift+h\"",
-          "description": "Swap the focused pane with the pane to the left."
-        },
-        {
-          "key": "keys.swap_pane_down",
-          "type": "keybinding",
-          "default": "\"prefix+shift+j\"",
-          "description": "Swap the focused pane with the pane below."
-        },
-        {
-          "key": "keys.swap_pane_up",
-          "type": "keybinding",
-          "default": "\"prefix+shift+k\"",
-          "description": "Swap the focused pane with the pane above."
-        },
-        {
-          "key": "keys.swap_pane_right",
-          "type": "keybinding",
-          "default": "\"prefix+shift+l\"",
-          "description": "Swap the focused pane with the pane to the right."
-        },
-        {
-          "key": "keys.cycle_pane_next",
-          "type": "keybinding",
-          "default": "\"prefix+tab\"",
-          "description": "Cycle to the next pane."
-        },
-        {
-          "key": "keys.cycle_pane_previous",
-          "type": "keybinding",
-          "default": "\"prefix+shift+tab\"",
-          "description": "Cycle to the previous pane."
-        },
-        {
-          "key": "keys.last_pane",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Focus the last focused pane across workspaces and tabs. Unset by default."
-        },
-        {
-          "key": "keys.split_vertical",
-          "type": "keybinding",
-          "default": "\"prefix+v\"",
-          "description": "Split pane vertically (side by side)."
-        },
-        {
-          "key": "keys.split_horizontal",
-          "type": "keybinding",
-          "default": "\"prefix+minus\"",
-          "description": "Split pane horizontally (stacked)."
-        },
-        {
-          "key": "keys.close_pane",
-          "type": "keybinding",
-          "default": "\"prefix+x\"",
-          "description": "Close the focused pane."
-        },
-        {
-          "key": "keys.zoom",
-          "type": "keybinding",
-          "default": "\"prefix+z\"",
-          "description": "Toggle zoom for the focused pane. The legacy key name `fullscreen` is accepted as an alias."
-        },
-        {
-          "key": "keys.resize_mode",
-          "type": "keybinding",
-          "default": "\"prefix+r\"",
-          "description": "Enter resize mode."
-        },
-        {
-          "key": "keys.resize_pane_left",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Resize the focused pane toward the left. Unset by default."
-        },
-        {
-          "key": "keys.resize_pane_down",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Resize the focused pane downward. Unset by default."
-        },
-        {
-          "key": "keys.resize_pane_up",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Resize the focused pane upward. Unset by default."
-        },
-        {
-          "key": "keys.resize_pane_right",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Resize the focused pane toward the right. Unset by default."
-        },
-        {
-          "key": "keys.toggle_sidebar",
-          "type": "keybinding",
-          "default": "\"prefix+b\"",
-          "description": "Toggle sidebar collapse."
-        },
-        {
-          "key": "keys.indexed.tabs",
-          "type": "string",
-          "default": "unset",
-          "description": "Modifier combo for tab shortcuts 1-9. Unset by default."
-        },
-        {
-          "key": "keys.indexed.workspaces",
-          "type": "string",
-          "default": "unset",
-          "description": "Modifier combo for workspace shortcuts 1-9. Unset by default."
-        },
-        {
-          "key": "keys.indexed.agents",
-          "type": "string",
-          "default": "unset",
-          "description": "Modifier combo for agent shortcuts 1-9. Unset by default."
+          "description": "Keybindings from before the keymap tree. No longer read; `herdr config check` reports it and `herdr keymap migrate` converts it to keymap.kdl."
         }
       ]
     },
@@ -890,6 +524,17 @@
           "description": "Collapsed sidebar presentation.",
           "values": [
             "compact",
+            "hidden"
+          ]
+        },
+        {
+          "key": "ui.mode_hint_bar",
+          "type": "enum",
+          "default": "full",
+          "description": "Menu bar presentation for keymap menus without their own bar= property.",
+          "values": [
+            "full",
+            "badge",
             "hidden"
           ]
         },
@@ -1459,6 +1104,12 @@
           "type": "boolean",
           "default": "true",
           "description": "Add keepalive fallbacks and private connection reuse for `herdr --remote`. Set false to run plain ssh unchanged."
+        },
+        {
+          "key": "remote.image_paste_key",
+          "type": "keybinding",
+          "default": "\"ctrl+v\"",
+          "description": "Raw key that pastes a clipboard image into the remote pane in `herdr --remote`. Empty disables it. Replaces `keys.remote_image_paste`."
         }
       ]
     },

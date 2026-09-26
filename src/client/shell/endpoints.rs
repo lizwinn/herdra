@@ -22,6 +22,8 @@ pub(crate) struct ClientShellEndpoint {
     pending_agent_view_projection: Option<ClientEndpointAgentViewProjection>,
     pub(crate) agent_view_projection_supported: bool,
     pub(crate) methods: Option<HashSet<String>>,
+    /// Keymap layers this server contributes: plugin menus and its own keymap.
+    pub(crate) keymap_projection: Option<crate::protocol::endpoint::EndpointKeymapProjection>,
 }
 
 pub(super) struct MachineHit {
@@ -83,6 +85,7 @@ impl ClientShellState {
                 agent_view_projection_supported: previous
                     .is_some_and(|endpoint| endpoint.agent_view_projection_supported),
                 methods: previous.and_then(|endpoint| endpoint.methods.clone()),
+                keymap_projection: previous.and_then(|endpoint| endpoint.keymap_projection.clone()),
             });
         }
 
@@ -105,7 +108,72 @@ impl ClientShellState {
         self.mode = ClientShellMode::Terminal;
         self.snapshot = None;
         self.graphics.set_scope("local:unavailable");
+        self.refresh_keymap_layers();
         self.reconcile_input_source();
+    }
+
+    /// Store the keymap layers a server sent, and rebuild the keymap when
+    /// they belong to the active server.
+    pub(crate) fn set_endpoint_keymap_projection(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        projection: crate::protocol::endpoint::EndpointKeymapProjection,
+    ) {
+        let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+        else {
+            return;
+        };
+        let stale = endpoint.keymap_projection.as_ref().is_some_and(|current| {
+            current.boot_id == projection.boot_id && current.revision > projection.revision
+        });
+        if stale {
+            return;
+        }
+        endpoint.keymap_projection = Some(projection);
+        if endpoint_id == &self.active_endpoint_id {
+            self.refresh_keymap_layers();
+        }
+    }
+
+    /// Rebuild the keymap from the active server's layers.
+    pub(super) fn refresh_keymap_layers(&mut self) {
+        let projection = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+            .and_then(|endpoint| endpoint.keymap_projection.as_ref());
+        let plugins = projection
+            .map(|projection| {
+                projection
+                    .plugins
+                    .iter()
+                    .map(|layer| {
+                        (
+                            layer.plugin_id.clone(),
+                            crate::input::keymap::KeymapText {
+                                source: layer.source.clone(),
+                                text: layer.text.clone(),
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let server_keymap = projection.map(|projection| {
+            projection
+                .server_keymap
+                .as_ref()
+                .map(|text| crate::input::keymap::KeymapText {
+                    source: "server keymap.kdl".to_owned(),
+                    text: text.clone(),
+                })
+        });
+        if self.config.set_keymap_layers(plugins, server_keymap) {
+            self.reset_menus_for_new_keymap();
+        }
     }
 
     pub(crate) fn retire_endpoint(&mut self, endpoint_id: &ClientEndpointId) {
@@ -238,6 +306,7 @@ impl ClientShellState {
         if switching_endpoint {
             // The aggregate agent list belongs to the client, not one endpoint.
             self.agent_scroll = agent_scroll;
+            self.refresh_keymap_layers();
         }
         if let Some((_, pane_id)) = pending_agent_reveal {
             self.reveal_endpoint_agent(endpoint_id, &pane_id, agent_body_height);
@@ -737,5 +806,6 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         pending_agent_view_projection: None,
         agent_view_projection_supported: false,
         methods: None,
+        keymap_projection: None,
     }
 }
