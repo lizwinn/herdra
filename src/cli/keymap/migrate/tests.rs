@@ -980,7 +980,7 @@ fn commands_with_control_characters_survive_migration() {
     assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
     assert_eq!(keymap.commands.len(), 1, "{}", migration.kdl);
     assert_eq!(keymap.commands[0].spec.command, command);
-    assert_eq!(keymap.commands[0].hint, description);
+    assert_eq!(keymap.commands[0].hint.as_deref(), Some(description));
 }
 
 #[test]
