@@ -140,18 +140,26 @@ impl ClientShellState {
         }
     }
 
-    /// Close the menus that attach `view` and every menu opened above them,
-    /// without running view hooks.
+    /// Close the menus that attach `view`, every menu opened above them, and
+    /// the one-shot menus passed through to reach them, without running view
+    /// hooks. A workspace list closed this way forgets its selection.
     pub(super) fn drop_view_menus(&mut self, view: ViewKind) {
         let Some(stack) = self.mode.stack() else {
             return;
         };
+        let keymap = &self.config.keymap;
         if let Some(position) = stack
             .frames()
             .iter()
-            .position(|id| self.config.keymap.menu(*id).view == Some(view))
+            .position(|id| keymap.menu(*id).view == Some(view))
         {
-            self.mode = ClientShellMode::from_stack(stack.truncated(position));
+            let next = stack
+                .truncated(position)
+                .and_then(|stack| stack.without_passed_through(keymap));
+            self.mode = ClientShellMode::from_stack(next);
+        }
+        if !self.workspace_list_active() {
+            self.navigate_workspace_id = None;
         }
     }
 
@@ -187,25 +195,33 @@ impl ClientShellState {
         match keymap::resolve(&keymap, self.mode.stack(), key) {
             Step::Forward => self.focused_pane_id().map(ClientInputTarget::Pane),
             Step::Ignore => None,
-            Step::Apply { next, effect } => {
+            Step::Apply { next, mut effect } => {
                 if let Effect::Run { binding, index } = &effect {
-                    if let Some(action) = binding_action(binding, *index) {
+                    let action = binding_action(binding, *index);
+                    if let Some(action) = action {
                         if !self.indexed_navigation_target_exists(&KeybindMatch::Action(action)) {
-                            return None;
+                            // The workspace list waits for a real choice;
+                            // other menus close as if the key ran.
+                            if self.top_view() == Some(ViewKind::WorkspaceList) {
+                                return None;
+                            }
+                            effect = Effect::None;
                         }
-                        if self.workspace_list_active()
-                            && self.workspace_preview_action_blocked()
-                            && !matches!(action, KeybindAction::WorkspaceList(_))
-                        {
-                            self.push_endpoint_notice(
-                                ClientEndpointNoticeKind::Rejected,
-                                "navigate_endpoint_inactive",
-                                "Confirm workspace first",
-                                "Select an available workspace and press Enter before using workspace or pane actions",
-                            );
-                            outcome.repaint = true;
-                            return None;
-                        }
+                    }
+                    let list_command = matches!(action, Some(KeybindAction::WorkspaceList(_)));
+                    if matches!(effect, Effect::Run { .. })
+                        && !list_command
+                        && self.workspace_list_active()
+                        && self.workspace_preview_action_blocked()
+                    {
+                        self.push_endpoint_notice(
+                            ClientEndpointNoticeKind::Rejected,
+                            "navigate_endpoint_inactive",
+                            "Confirm workspace first",
+                            "Select an available workspace and press Enter before using workspace or pane actions",
+                        );
+                        outcome.repaint = true;
+                        return None;
                     }
                 }
                 let before = self.open_menus(next, outcome);

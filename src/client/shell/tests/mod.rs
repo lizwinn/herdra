@@ -62,8 +62,8 @@ impl ClientShellState {
             .map_or("terminal", |menu| menu.title.as_str())
     }
 
-    /// Open the menu with this title without running view hooks, the way
-    /// tests used to assign a mode.
+    /// Open the menu with this title, and the menus its keys pass through,
+    /// without running view hooks, the way tests used to assign a mode.
     pub(super) fn set_mode_name(&mut self, name: &str) {
         let index = self
             .config
@@ -72,7 +72,8 @@ impl ClientShellState {
             .iter()
             .position(|menu| menu.title == name)
             .unwrap_or_else(|| panic!("no menu titled {name}"));
-        self.mode = ClientShellMode::Menu(crate::input::keymap::MenuStack::single(
+        self.mode = ClientShellMode::Menu(crate::input::keymap::MenuStack::opened_at(
+            &self.config.keymap,
             crate::input::keymap::MenuId(index as u16),
         ));
     }

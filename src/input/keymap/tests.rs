@@ -96,7 +96,7 @@ fn default_tree_groups_actions_under_the_prefix() {
     assert_eq!(ran, ["tab.new"]);
 
     let (stack, ran) = press(&keymap, &[ctrl('b'), ch('w')]);
-    assert_eq!(titles(&keymap, stack), ["workspace"]);
+    assert_eq!(titles(&keymap, stack), ["herdra", "workspace"]);
     assert!(ran.is_empty());
 
     let (stack, ran) = press(&keymap, &[ctrl('b'), ch('w'), ch('j'), ch('j'), ch('n')]);
@@ -128,7 +128,7 @@ fn unmatched_keys_follow_each_level() {
     let (stack, _) = press(&keymap, &[ctrl('b'), ch('w'), ch('%')]);
     assert_eq!(
         titles(&keymap, stack),
-        ["workspace"],
+        ["herdra", "workspace"],
         "unmatched=ignore keeps the list open"
     );
 }
@@ -145,11 +145,11 @@ fn prefix_twice_sends_the_literal_prefix() {
 fn stay_leaves_and_sticky_menus_keep_menus_open() {
     let keymap = CompiledKeymap::default();
     let (stack, ran) = press(&keymap, &[ctrl('b'), ch('p'), ch('h'), ch('l')]);
-    assert_eq!(titles(&keymap, stack), ["pane"]);
+    assert_eq!(titles(&keymap, stack), ["herdra", "pane"]);
     assert_eq!(ran, ["pane.focus.left", "pane.focus.right"]);
 
     let (stack, ran) = press(&keymap, &[ctrl('b'), ch('p'), ch('r'), ch('h'), ch('h')]);
-    assert_eq!(titles(&keymap, stack), ["resize"]);
+    assert_eq!(titles(&keymap, stack), ["herdra", "pane", "resize"]);
     assert_eq!(ran, ["pane.resize.left", "pane.resize.left"]);
 
     let (stack, _) = press(&keymap, &[ctrl('b'), ch('p'), ch('r'), key(KeyCode::Enter)]);
@@ -195,7 +195,7 @@ fn copy_mode_is_a_mode_that_menus_return_to() {
     );
     assert_eq!(titles(&keymap, stack), ["copy"]);
     let (stack, _) = press(&keymap, &[ctrl('b'), ch('p'), ch('y'), ctrl('b'), ch('t')]);
-    assert_eq!(titles(&keymap, stack), ["copy", "tab"]);
+    assert_eq!(titles(&keymap, stack), ["copy", "herdra", "tab"]);
     let (stack, ran) = press(
         &keymap,
         &[ctrl('b'), ch('p'), ch('y'), ctrl('b'), ch('t'), ch('n')],
@@ -344,7 +344,7 @@ fn named_menus_can_be_opened_from_anywhere() {
             ch('h'),
         ],
     );
-    assert_eq!(titles(&keymap, stack), ["resize"]);
+    assert_eq!(titles(&keymap, stack), ["herdra", "resize"]);
     assert_eq!(ran, ["pane.resize.left"]);
 
     let keymap = build("prefix { m menu.open nowhere }");
@@ -576,4 +576,173 @@ fn shared_keymaps_hide_command_text() {
     assert_eq!(keymap.commands[0].path_label, "ctrl+b g");
     assert_eq!(keymap.commands[0].hint, "git");
     assert_eq!(redact_commands("prefix {"), None);
+}
+
+fn shift(c: char) -> TerminalKey {
+    TerminalKey::new(KeyCode::Char(c), KeyModifiers::SHIFT)
+}
+
+#[test]
+fn backspace_returns_to_the_menu_a_submenu_opened_from() {
+    let keymap = CompiledKeymap::default();
+    let (stack, _) = press(&keymap, &[ctrl('b'), ch('t'), key(KeyCode::Backspace)]);
+    assert_eq!(titles(&keymap, stack), ["herdra"]);
+    let (stack, _) = press(
+        &keymap,
+        &[ctrl('b'), ch('w'), ch('t'), key(KeyCode::Backspace)],
+    );
+    assert_eq!(titles(&keymap, stack), ["herdra", "workspace"]);
+    let (stack, _) = press(&keymap, &[ctrl('b'), ch('p'), ch('r'), key(KeyCode::Esc)]);
+    assert_eq!(stack, None, "esc still closes every menu");
+}
+
+#[test]
+fn submenus_of_the_workspace_list_keep_the_list_open() {
+    let keymap = CompiledKeymap::default();
+    let (stack, _) = press(&keymap, &[ctrl('b'), ch('w'), ch('j'), ch('t')]);
+    assert_eq!(titles(&keymap, stack), ["herdra", "workspace", "worktree"]);
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('w'), ch('j'), ch('t'), ch('n')]);
+    assert_eq!(stack, None, "a leaf closes the menus it passed through");
+    assert_eq!(ran, ["workspace.list.down", "worktree.new"]);
+}
+
+#[test]
+fn one_digit_changes_leave_the_rest_of_the_range() {
+    let keymap = build("prefix { t { \"5\" tab.close } }");
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    assert_eq!(
+        press(&keymap, &[ctrl('b'), ch('t'), ch('5')]).1,
+        ["tab.close:4"]
+    );
+    assert_eq!(
+        press(&keymap, &[ctrl('b'), ch('t'), ch('3')]).1,
+        ["tab.switch:2"]
+    );
+
+    let keymap = build("prefix { t { \"9\" none } }");
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    assert!(press(&keymap, &[ctrl('b'), ch('t'), ch('9')]).1.is_empty());
+    assert_eq!(
+        press(&keymap, &[ctrl('b'), ch('t'), ch('2')]).1,
+        ["tab.switch:1"]
+    );
+
+    let keymap = build("prefix { g { \"1..9\" tab.switch; \"5\" tab.close } }");
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    assert_eq!(
+        press(&keymap, &[ctrl('b'), ch('g'), ch('5')]).1,
+        ["tab.close:4"]
+    );
+    assert_eq!(
+        press(&keymap, &[ctrl('b'), ch('g'), ch('4')]).1,
+        ["tab.switch:3"]
+    );
+}
+
+#[test]
+fn overlays_can_name_and_replace_default_menus() {
+    let keymap = build(
+        r#"
+        prefix { p id=panes {} }
+        ctrl+alt+p menu.open panes
+        "#,
+    );
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    let ctrl_alt_p = TerminalKey::new(
+        KeyCode::Char('p'),
+        KeyModifiers::CONTROL | KeyModifiers::ALT,
+    );
+    assert_eq!(
+        press(&keymap, &[ctrl_alt_p, ch('h')]).1,
+        ["pane.focus.left"]
+    );
+
+    let keymap = build(
+        r#"
+        prefix { p { r replace { h pane.resize.left } } }
+        alt+r menu.open resize
+        "#,
+    );
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    let (stack, ran) = press(
+        &keymap,
+        &[ctrl('b'), ch('p'), ch('r'), ch('h'), ch('l'), ch('h')],
+    );
+    assert_eq!(
+        titles(&keymap, stack),
+        ["herdra", "pane", "resize"],
+        "replace keeps the menu sticky"
+    );
+    assert_eq!(ran, ["pane.resize.left", "ignore", "pane.resize.left"]);
+    let alt_r = TerminalKey::new(KeyCode::Char('r'), KeyModifiers::ALT);
+    assert_eq!(press(&keymap, &[alt_r, ch('h')]).1, ["pane.resize.left"]);
+}
+
+#[test]
+fn named_menus_stay_reachable_after_their_key_is_rebound() {
+    let keymap = build("base classic\nprefix { r app.reload; R menu.open resize }");
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    assert_eq!(press(&keymap, &[ctrl('b'), ch('r')]).1, ["app.reload"]);
+    let (stack, ran) = press(&keymap, &[ctrl('b'), shift('r'), ch('h')]);
+    assert_eq!(titles(&keymap, stack), ["prefix", "resize"]);
+    assert_eq!(ran, ["pane.resize.left"]);
+}
+
+#[test]
+fn fallthrough_menus_use_the_keys_of_the_menu_below() {
+    let keymap = build("base classic\nprefix { c none; t tab.new }");
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('w'), ch('t')]);
+    assert_eq!(
+        stack, None,
+        "a prefix leaf leaves navigate like it did before"
+    );
+    assert_eq!(ran, ["tab.new"]);
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('w'), ch('c')]);
+    assert_eq!(titles(&keymap, stack), ["prefix", "navigate"]);
+    assert_eq!(
+        ran,
+        ["ignore"],
+        "unbound prefix keys stay unbound in navigate"
+    );
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('w'), ch('j')]);
+    assert_eq!(titles(&keymap, stack), ["prefix", "navigate"]);
+    assert_eq!(ran, ["pane.focus.down"], "navigate's own keys win");
+    let (stack, _) = press(&keymap, &[ctrl('b'), ch('w'), ch('r')]);
+    assert_eq!(titles(&keymap, stack), ["prefix", "resize"]);
+}
+
+#[test]
+fn ctrl_bracket_is_escape_inside_menus_only() {
+    let keymap = CompiledKeymap::default();
+    assert_eq!(press(&keymap, &[ctrl('b'), ctrl('[')]).0, None);
+    let (stack, _) = press(&keymap, &[ctrl('b'), ch('p'), ch('r'), ctrl('[')]);
+    assert_eq!(stack, None, "sticky menus close too");
+    assert_eq!(press(&keymap, &[ctrl('[')]).1, ["forward"]);
+}
+
+#[test]
+fn a_prefix_without_modifiers_keeps_the_whole_tree() {
+    let keymap = build("base classic prefix=\"`\"");
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    assert!(keymap.conflicts.is_empty(), "{:?}", keymap.conflicts);
+    assert_eq!(press(&keymap, &[ch('`'), ch('c')]).1, ["tab.new"]);
+    assert_eq!(press(&keymap, &[ch('`'), ch('`')]).1, ["literal"]);
+    assert_eq!(press(&keymap, &[ch('a')]).1, ["forward"]);
+}
+
+#[test]
+fn built_in_keys_give_way_to_a_custom_prefix() {
+    let keymap = build("base prefix=ctrl+a");
+    let (stack, ran) = press(&keymap, &[ctrl('a'), ch('p'), ch('y'), ctrl('b')]);
+    assert_eq!(titles(&keymap, stack), ["copy"]);
+    assert_eq!(ran, ["copy.page.up"]);
+
+    let keymap = CompiledKeymap::default();
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('p'), ch('y'), ctrl('b')]);
+    assert_eq!(titles(&keymap, stack), ["copy", "herdra"]);
+    assert!(
+        ran.is_empty(),
+        "with the default prefix, ctrl+b opens the menu"
+    );
 }

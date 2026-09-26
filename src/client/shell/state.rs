@@ -1143,7 +1143,10 @@ impl ClientShellState {
             .keymap
             .menu_with_view(crate::input::keymap::ViewKind::WorkspaceList)
             .map_or(ClientShellMode::Terminal, |menu| {
-                ClientShellMode::Menu(crate::input::keymap::MenuStack::single(menu))
+                ClientShellMode::Menu(crate::input::keymap::MenuStack::opened_at(
+                    &self.config.keymap,
+                    menu,
+                ))
             })
     }
 

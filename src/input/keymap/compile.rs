@@ -100,6 +100,8 @@ pub(crate) struct CompiledMenu {
     pub(crate) unmatched: Unmatched,
     /// `None` follows the `[ui] mode_hint_bar` setting.
     pub(crate) bar: Option<BarVisibility>,
+    /// Keys this menu does not bind are looked up in the menu under it.
+    pub(crate) fallthrough: bool,
     pub(crate) bindings: Vec<CompiledBinding>,
     pub(crate) bar_plan: BarPlan,
 }
@@ -213,7 +215,7 @@ impl CompiledKeymap {
                 &mut diagnostics,
             ));
         }
-        let merged = merge_layers(layers, &mut conflicts);
+        let (merged, detached) = merge_layers(layers, &mut conflicts);
         let mut compiler = Compiler {
             menus: Vec::new(),
             commands: Vec::new(),
@@ -222,6 +224,21 @@ impl CompiledKeymap {
             diagnostics: &mut diagnostics,
         };
         compiler.add_menu(None, None, TopLevel::menu(), &merged, &[]);
+        // Named menus whose key was rebound or unbound stay reachable by
+        // `menu.open`, unless a later layer reused their id.
+        for node in detached {
+            let RawBody::Menu(menu) = node.body else {
+                continue;
+            };
+            let taken = menu
+                .id
+                .as_ref()
+                .is_some_and(|id| compiler.menu_ids.iter().any(|(existing, _)| existing == id));
+            if !taken {
+                let children = menu.children.clone();
+                compiler.add_menu(None, None, menu, &children, &[]);
+            }
+        }
         compiler.resolve_opens();
         // Views can also open without a key (the mobile switcher, resuming
         // copy mode on refocus). Give views that no menu attaches an empty,
@@ -524,6 +541,13 @@ impl Compiler<'_> {
                 chord.label()
             ),
             (_, Some(chord)) => chord.label(),
+            (None, None) if !self.menus.is_empty() => format!(
+                "({})",
+                meta.id
+                    .as_deref()
+                    .or(meta.title.as_deref())
+                    .unwrap_or_default()
+            ),
             _ => String::new(),
         };
         let view = meta.view;
@@ -548,6 +572,7 @@ impl Compiler<'_> {
                 Unmatched::Cancel
             }),
             bar: meta.bar,
+            fallthrough: meta.fallthrough.unwrap_or(false),
             bindings: Vec::new(),
             bar_plan: BarPlan::default(),
         });
@@ -736,58 +761,74 @@ impl Compiler<'_> {
 }
 
 /// Merge later layers over earlier ones, matching nodes by chord path.
-fn merge_layers(layers: Vec<KeymapLayer>, conflicts: &mut Vec<String>) -> Vec<RawNode> {
+/// Returns the merged tree and the named menus that lost their key, which
+/// stay reachable through `menu.open`.
+fn merge_layers(
+    layers: Vec<KeymapLayer>,
+    conflicts: &mut Vec<String>,
+) -> (Vec<RawNode>, Vec<RawNode>) {
     let mut layers = layers.into_iter();
     let Some(first) = layers.next() else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let mut merged = first.nodes;
+    let mut detached = Vec::new();
     for layer in layers {
         merge_level(
             &mut merged,
             layer.nodes,
-            &layer.owner,
-            &layer.source,
+            &Overlay {
+                owner: &layer.owner,
+                source: &layer.source,
+            },
             conflicts,
+            &mut detached,
         );
     }
-    merged
+    (merged, detached)
+}
+
+struct Overlay<'a> {
+    owner: &'a LayerOwner,
+    source: &'a str,
+}
+
+impl Overlay<'_> {
+    /// Plugins may only change what they added themselves.
+    fn may_edit(&self, existing: &LayerOwner) -> bool {
+        !matches!(self.owner, LayerOwner::Plugin(_)) || existing == self.owner
+    }
 }
 
 fn merge_level(
     merged: &mut Vec<RawNode>,
     overlay: Vec<RawNode>,
-    owner: &LayerOwner,
-    source: &str,
+    layer: &Overlay<'_>,
     conflicts: &mut Vec<String>,
+    detached: &mut Vec<RawNode>,
 ) {
     for node in overlay {
-        let overlapping = merged
-            .iter()
-            .enumerate()
-            .filter(|(_, existing)| existing.chord.overlaps(node.chord))
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        let menu_merge_index = match &node.body {
-            RawBody::Menu(menu) if !menu.replace => match overlapping.as_slice() {
-                [index]
-                    if merged[*index].chord == node.chord
-                        && matches!(merged[*index].body, RawBody::Menu(_)) =>
-                {
-                    Some(*index)
-                }
-                _ => None,
-            },
+        let overlapping = overlapping_nodes(merged, node.chord);
+        let exact_menu = match (&node.body, overlapping.as_slice()) {
+            (RawBody::Menu(_), [index])
+                if merged[*index].chord == node.chord
+                    && matches!(merged[*index].body, RawBody::Menu(_)) =>
+            {
+                Some(*index)
+            }
             _ => None,
         };
-        if let LayerOwner::Plugin(_) = owner {
+        let replaces_menu = matches!(&node.body, RawBody::Menu(menu) if menu.replace);
+        if let LayerOwner::Plugin(_) = layer.owner {
             let foreign = overlapping
                 .iter()
-                .find(|index| merged[**index].owner != *owner)
+                .find(|index| merged[**index].owner != *layer.owner)
                 .copied();
-            if let (Some(foreign), None) = (foreign, menu_merge_index) {
+            let adds_to_menu = exact_menu.is_some() && !replaces_menu;
+            if let (Some(foreign), false) = (foreign, adds_to_menu) {
                 conflicts.push(format!(
-                    "keymap {source}:{}: {} is already bound by {}; keeping that binding",
+                    "keymap {}:{}: {} is already bound by {}; keeping that binding",
+                    layer.source,
                     node.line,
                     node.chord.label(),
                     merged[foreign].owner.label()
@@ -795,29 +836,39 @@ fn merge_level(
                 continue;
             }
         }
-        if let Some(index) = menu_merge_index {
-            let existing_owner = merged[index].owner.clone();
+        if let Some(index) = exact_menu {
             let RawBody::Menu(incoming) = node.body else {
                 continue;
             };
+            let may_edit = layer.may_edit(&merged[index].owner);
             if let RawBody::Menu(existing) = &mut merged[index].body {
-                let may_edit = !matches!(owner, LayerOwner::Plugin(_)) || existing_owner == *owner;
                 if may_edit {
                     merge_menu_metadata(existing, &incoming);
                 }
-                merge_level(
-                    &mut existing.children,
-                    incoming.children,
-                    owner,
-                    source,
-                    conflicts,
-                );
+                if replaces_menu {
+                    for old in std::mem::replace(&mut existing.children, incoming.children) {
+                        detach_named_menus(old, detached);
+                    }
+                } else {
+                    merge_level(
+                        &mut existing.children,
+                        incoming.children,
+                        layer,
+                        conflicts,
+                        detached,
+                    );
+                }
             }
             continue;
         }
+        // One digit over a `1..9` range takes only its own key.
+        if let Chord::Key(combo) = node.chord {
+            split_digit_ranges(merged, combo);
+        }
+        let overlapping = overlapping_nodes(merged, node.chord);
         let insert_at = overlapping.first().copied();
         for index in overlapping.iter().rev() {
-            merged.remove(*index);
+            detach_named_menus(merged.remove(*index), detached);
         }
         if matches!(node.body, RawBody::Unbind) {
             continue;
@@ -829,7 +880,56 @@ fn merge_level(
     }
 }
 
+fn overlapping_nodes(merged: &[RawNode], chord: Chord) -> Vec<usize> {
+    merged
+        .iter()
+        .enumerate()
+        .filter(|(_, existing)| existing.chord.overlaps(chord))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// Replace every `1..9` leaf that covers `combo` with nine single-digit
+/// leaves, so binding or unbinding one digit leaves the other eight alone.
+fn split_digit_ranges(merged: &mut Vec<RawNode>, combo: crate::config::KeyCombo) {
+    let (KeyCode::Char('1'..='9'), modifiers) = combo else {
+        return;
+    };
+    let Some(index) = merged.iter().position(|existing| {
+        existing.chord == Chord::Digits(modifiers) && matches!(existing.body, RawBody::Leaf(_))
+    }) else {
+        return;
+    };
+    let range = merged.remove(index);
+    for (offset, digit) in ('1'..='9').enumerate() {
+        let mut single = range.clone();
+        single.chord = Chord::Key((KeyCode::Char(digit), modifiers));
+        merged.insert(index + offset, single);
+    }
+}
+
+/// Keep named menus from a removed subtree so `menu.open` still reaches
+/// them; everything else in it is dropped.
+fn detach_named_menus(node: RawNode, detached: &mut Vec<RawNode>) {
+    let RawBody::Menu(menu) = &node.body else {
+        return;
+    };
+    if menu.id.is_some() {
+        detached.push(node);
+        return;
+    }
+    let RawBody::Menu(menu) = node.body else {
+        return;
+    };
+    for child in menu.children {
+        detach_named_menus(child, detached);
+    }
+}
+
 fn merge_menu_metadata(existing: &mut RawMenu, incoming: &RawMenu) {
+    if incoming.id.is_some() {
+        existing.id.clone_from(&incoming.id);
+    }
     if incoming.title.is_some() {
         existing.title.clone_from(&incoming.title);
     }
@@ -856,6 +956,9 @@ fn merge_menu_metadata(existing: &mut RawMenu, incoming: &RawMenu) {
     }
     if incoming.priority.is_some() {
         existing.priority = incoming.priority;
+    }
+    if incoming.fallthrough.is_some() {
+        existing.fallthrough = incoming.fallthrough;
     }
 }
 
