@@ -13,7 +13,7 @@ Herdr is mouse-native. You can click panes, tabs, workspaces, and agents, drag s
 
 A terminal multiplexer sits between your terminal and the programs running inside it. Those programs already use most key combinations: `ctrl+c` interrupts, `ctrl+r` searches history, editors claim nearly everything else. If Herdr grabbed common keys directly, it would break the programs inside it.
 
-The prefix solves this. Press the prefix key, default `ctrl+b`, and Herdr opens its main menu instead of sending the key to your terminal. The bar at the bottom shows every key the menu accepts. `ctrl+b t n` means: press `ctrl+b`, release, press `t` to open the tab menu, then `n` for a new tab. Keys with a `+` in the bar open another menu. Press `esc` to close the menus, or `backspace` to go back one.
+The prefix solves this. Press the prefix key, default `ctrl+b`, and Herdr opens its main menu instead of sending the key to your terminal. The bar at the bottom shows every key the menu accepts. `ctrl+b t n` means: press `ctrl+b`, release, press `t` to open the tab menu, then `n` for a new tab. Keys with a `+` in the bar open another menu on top of the one you are in. Press `backspace` to go back one menu, or `esc` to close them; `ctrl+[` works as `esc` too. Most keys close their menu when they run, along with every menu you opened on the way, so `ctrl+b t n` leaves you typing in the new tab.
 
 Press `ctrl+b ?` at any time to see every key, grouped by menu. Press `/` in the keybind help to filter actions and shortcuts; use Backspace to edit the filter or `ctrl+u` to clear it.
 
@@ -103,7 +103,7 @@ Typing and paste insert at the cursor. Movement and deletion respect Unicode gra
 
 ## Copy mode
 
-Press `ctrl+b p y` to enter copy mode for the focused pane. Use `h/j/k/l`, tmux-style `w/b/e` and big-word `W/B/E`, `{`/`}`, `PageUp`/`PageDown`, `ctrl+f`, and `ctrl+u`/`ctrl+d` to move. Press `/` or `?` for forward or backward literal search, then `n` or `N` to repeat in the same or opposite direction. Search is case-insensitive unless the query contains an uppercase letter. Use `v` or Space to start a selection, `y` or Enter to copy it, and `q` or Esc to leave without copying. Esc clears an active selection or search before exiting. Copy mode does not pause the pane process: output remains live, follows at the bottom, and stays pinned when you navigate into history. The prefix keeps working in copy mode: `ctrl+b` opens the main menu, and when you finish there you return to copy mode. Mouse drag-select copies without entering copy mode at all.
+Press `ctrl+b p y` to enter copy mode for the focused pane. The pane menu closes as copy mode opens, so leaving copy mode returns you to the pane. Use `h/j/k/l`, tmux-style `w/b/e` and big-word `W/B/E`, `{`/`}`, `PageUp`/`PageDown`, `ctrl+f`, and `ctrl+u`/`ctrl+d` to move. Press `/` or `?` for forward or backward literal search, then `n` or `N` to repeat in the same or opposite direction. Search is case-insensitive unless the query contains an uppercase letter. Use `v` or Space to start a selection, `y` or Enter to copy it, and `q` or Esc to leave without copying. Esc clears an active selection or search before exiting. Copy mode does not pause the pane process: output remains live, follows at the bottom, and stays pinned when you navigate into history. The prefix keeps working in copy mode: `ctrl+b` opens the main menu, and when you finish there you return to copy mode. Mouse drag-select copies without entering copy mode at all.
 
 Mouse drag selections and selections started with `v`, Space, or `V` remain active during output and redraws, including when part of the selected range is outside the viewport. Copy reads the current text in that range, not a frozen snapshot. Resizing the pane or switching between its normal and alternate screens still clears the selection. Search results and double-click word selections retain their content-change checks.
 
@@ -117,11 +117,17 @@ prefix {
     t {
         c tab.new         // ctrl+a t c also opens a new tab
     }
-    g popup "lazygit" width="90%" height="90%"
+    G popup "lazygit" width="90%" height="90%"   // ctrl+a G runs lazygit
 }
 ```
 
 To keep Herdr's one-key layout (`ctrl+b c` for a new tab, `ctrl+b v` to split), start your file with `base classic`. See [the keymap reference](/docs/keymap/) for every option.
+
+The prefix does not need a modifier. With a backtick as the prefix, press the backtick twice to type one:
+
+```kdl
+base prefix="`"
+```
 
 ## Going prefix-free
 

@@ -20,13 +20,15 @@ Run `herdr keymap path` to print the file Herdra reads. Changes apply after `her
 
 ## How the tree works
 
-A menu opens when you press its key and shows its children in the bottom bar. Keys with a `+` open another menu. Keys drawn in mauve keep the menu open after they run. Press `esc` to close the menus you opened, and `backspace` to go back one menu.
+A menu opens when you press its key and shows its children in the bottom bar. Keys with a `+` open another menu. Keys drawn in mauve keep the menu open after they run.
 
-- **Menus close after an action by default.** `ctrl+b t n` opens a new tab and returns you to the pane.
+- **Submenus stack.** A submenu opens on top of the menu you opened it from. `backspace` goes back one menu. `esc` closes menus down to the nearest mode, or back to the pane. Inside menus, `ctrl+[` also works as `esc` unless your keymap binds `ctrl+[`.
+- **Menus close after an action by default.** The menus you passed through to reach the key close with it, down to the nearest sticky menu or mode. `ctrl+b t n` opens a new tab and returns you to the pane, not to the main menu.
 - **`stay` keeps the menu open after a key runs.** In the default tree, `ctrl+b p h h l` moves focus three times and leaves the pane menu open.
-- **`sticky` menus keep every key open until you press `esc`.** Resize (`ctrl+b p r`) is sticky, so `h h h` resizes three steps.
-- **Mode menus are where `esc` returns to.** Copy mode is a mode: press the prefix inside copy mode, run a command, and you land back in copy mode.
+- **`sticky` menus keep every key open until you press `esc`.** Resize (`ctrl+b p r`) is sticky, so `h h h` resizes three steps. A key in a submenu of a sticky menu returns you to the sticky menu.
+- **Mode menus are where `esc` returns to.** Copy mode is a mode: press the prefix inside copy mode, run a command, and you land back in copy mode. Entering a mode closes the menus you passed through to reach it, as an action would, so leaving copy mode (`ctrl+b p y`, then `q`) returns you to the pane.
 - **Top-level chords work everywhere.** The prefix reopens the main menu from inside any menu, and prefix-free chords such as `alt+h` work inside copy mode too.
+- **`fallthrough` menus share the keys of the menu under them.** A key the menu does not bind is looked up in the menu it was opened from, and runs as if you pressed it there. Classic's navigate menu uses this, so every prefix key also works in navigate mode.
 - **Unknown keys** close a menu, unless it is sticky or sets `unmatched=ignore`. At the top level they go to the pane.
 
 Press `?` in the main menu to list every key in the tree. The list is grouped by menu and filters as you type after `/`.
@@ -42,7 +44,7 @@ prefix {
     t {
         c tab.new "create"
     }
-    g popup "lazygit" width="90%" height="90%"
+    G popup "lazygit" width="90%" height="90%"
     m monitor sticky {
         j pane.focus.down
         k pane.focus.up
@@ -50,9 +52,15 @@ prefix {
 }
 ```
 
-**Chords** use the same names as the rest of Herdr: `ctrl+a`, `shift+tab`, `alt+1`, `f5`, `enter`, `home`, `pageup`, and single characters such as `?` or `$`. An uppercase letter means shift: `N` is `shift+n`. Write `1..9` for all nine digits; the digit you press picks the tab, workspace, or agent. Put a chord in quotes when it starts with a digit or contains `[`, `]`, `{`, `}`, `/`, `\`, `#`, `=`, or `;`: `"["`, `"0"`, `"ctrl+/"`. Named keys such as `lbracket`, `slash`, and `semicolon` also work unquoted.
+**Chords** use the same names as the rest of Herdr: `ctrl+a`, `shift+tab`, `alt+1`, `f5`, `enter`, `home`, `pageup`, and single characters such as `?` or `$`. An uppercase letter means shift: `N` is `shift+n`. Write `1..9` for all nine digits; the digit you press picks the tab, workspace, or agent. A single digit next to a `1..9` range takes only its own key, and the range keeps the other eight. Put a chord in quotes when it starts with a digit or contains `[`, `]`, `{`, `}`, `(`, `)`, `/`, `\`, `#`, `=`, or `;`: `"["`, `"0"`, `"ctrl+/"`. Without quotes, most of these are KDL syntax errors, and a syntax error makes Herdra ignore the whole file (see [Checking your file](#checking-your-file)). Named keys such as `lbracket`, `slash`, and `semicolon` also work unquoted.
 
-**`prefix`** stands for your prefix chord wherever a chord goes. Top-level chords must not steal typing: a plain letter, digit, `enter`, `tab`, `esc`, `backspace`, or arrow is only allowed inside a menu.
+**`prefix`** stands for your prefix chord wherever a chord goes. Top-level chords must not steal typing: a plain letter, digit, `enter`, `tab`, `esc`, `backspace`, or arrow is only allowed inside a menu. The prefix is the exception: it can be a key without modifiers, such as a backtick. In the built-in trees, pressing it twice types it.
+
+```kdl
+base prefix="`"
+```
+
+A built-in key inside a menu that is the same chord as your prefix gives way to it, so the prefix still works there. With `base prefix=ctrl+f`, `ctrl+f` in copy mode opens the main menu instead of paging down.
 
 **Leaves** name their target first. The next word, if it is not a flag, is the hint shown in the bar; without one, Herdra uses the action's short label.
 
@@ -69,16 +77,17 @@ prefix {
 
 | Flag or property | Effect |
 | --- | --- |
-| `sticky` | Every key stays open until `esc`. |
-| `mode` | `esc` and menu cancels return here. |
+| `sticky` | Every key stays open until `esc`. Keys in its submenus return here. |
+| `mode` | `esc` and menu cancels return here. Entering it closes the menus passed through to reach it. |
+| `fallthrough` | Keys this menu does not bind are looked up in the menu under it, and run as if pressed there. |
 | `view=workspace-list` | Show the workspace list while the menu is open. |
 | `view=copy` | Run copy mode on the focused pane while the menu is open. Copy menus are sticky modes unless you say otherwise. |
 | `unmatched=ignore\|cancel\|forward` | What an unbound key does: nothing, close the menu, or close it and send the key to the pane. |
 | `bar=full\|badge\|hidden` | Show every hint, only the menu title, or no bar. Menus without `bar=` follow `ui.mode_hint_bar` in `config.toml`. |
-| `id=name` | Let `menu.open name` open this menu from anywhere. |
+| `id=name` | Let `menu.open name` open this menu from anywhere, even after its key is rebound or removed. |
 | `hint="..."` | Text shown in the parent menu's bar. Defaults to the title. |
 | `hidden`, `priority=N` | As for leaves. |
-| `replace` | Drop the default children of this menu instead of adding to them. |
+| `replace` | Swap this menu's children for the ones you write instead of adding to them. The menu keeps its title, flags, and id unless you set new ones. |
 
 ## Changing the default tree
 
@@ -87,7 +96,10 @@ Your file is laid over the default tree by chord path.
 - **Add a key** by writing it where you want it: `prefix { t { c tab.new } }` adds `ctrl+b t c`.
 - **Change a key** by writing the same path with a new target.
 - **Remove a key** with the target `none`: `prefix { w { x none } }`.
-- **Replace a whole menu** with `replace`: `prefix herdra replace { ... }`.
+- **Change one digit** of a `1..9` range by writing that digit alone. The other eight keep working: `prefix { a { "9" none } }` removes only `ctrl+b a 9`.
+- **Change a menu** by writing it again. Flags you write override the menu's own, keys you write are added or changed, and the rest stay: `prefix { t sticky {} }` makes the tab menu sticky. This is also how you name a built-in menu: `prefix { t id=tabs {} }` lets `menu.open tabs` open it.
+- **Replace a menu's keys** with `replace`: `prefix { p replace { ... } }` swaps every key in the pane menu for the ones you write. The menu keeps its title, flags, and id unless you set new ones.
+- **Named menus outlive their key.** A menu with an `id=` stays reachable through `menu.open` after you rebind or remove its key, or `replace` its parent. With `prefix { p { r none } }`, `ctrl+b p r` is gone, but `alt+r menu.open resize` still opens resize.
 - **Move the prefix** with `base prefix=ctrl+a`.
 - **Start from another tree** with `base classic` for Herdr's one-key layout (`ctrl+b c` for a new tab), or `base none` to build everything yourself.
 
@@ -95,7 +107,13 @@ Your file is laid over the default tree by chord path.
 base classic prefix=ctrl+a
 ```
 
-A problem in your file drops only the line it names. `herdr keymap check` and `herdr config check` print every problem with its line number, and the rest of your keymap keeps working.
+## Checking your file
+
+`herdr keymap check` and `herdr config check` print every problem in your keymap.
+
+- **Most problems drop only the line they name**, such as an unknown action or a key bound twice in one menu. They print with their line number, and the rest of your keymap keeps working.
+- **Some problems only show once the tree is built**, such as `menu.open` with an unknown id, or a copy action outside a menu with `view=copy`. These print with the key's path, like `ctrl+b z`, instead of a line number.
+- **A KDL syntax error makes the whole file unreadable.** Common causes are an unquoted chord that needs quotes, such as `ctrl+/`, and an unbalanced brace or parenthesis. At startup Herdra ignores the whole file, including `base`, so you get the default tree and the `ctrl+b` prefix. On a live reload Herdra keeps the keymap it is already using until you fix the error.
 
 ## Targets
 
@@ -372,7 +390,7 @@ Plugins can ship their own `keymap.kdl` that adds keys and menus to this tree. H
 | --- | --- |
 | `herdr keymap print [--json]` | Show the effective tree, including where each key came from. It asks the running server, so plugin menus appear; with no server running it reads your files. |
 | `herdr keymap default [herdra\|classic]` | Print a built-in tree. |
-| `herdr keymap check [FILE]` | Check a keymap file and print problems with line numbers. |
+| `herdr keymap check [FILE]` | Check a keymap file and print its problems. |
 | `herdr keymap path` | Print where Herdra reads `keymap.kdl`. |
 | `herdr keymap migrate [--dry-run]` | Convert `[keys]` in `config.toml` into `keymap.kdl`. |
 | `herdr keymap reset` | Move `keymap.kdl` aside so the default tree applies. |
