@@ -103,7 +103,7 @@ Restart the terminal so it reloads its environment, then confirm the Herdr insta
 
 The operating system or outer terminal may consume the chord before Herdr receives it. Free the chord in that layer or choose another binding. See [Keyboard](/docs/keyboard/#going-prefix-free) for known conflicts and safe defaults.
 
-Run `herdr keymap check` to see whether Herdr dropped the line: it prints every problem in `keymap.kdl` with its line number, such as an unknown action or a chord that needs quotes. `herdr keymap print` shows the tree Herdr is actually using. If your keys still live in `[keys]` in `config.toml`, run `herdr keymap migrate`.
+Run `herdr keymap check` to see whether Herdr dropped the line: it prints every problem in `keymap.kdl`, such as an unknown action, usually with its line number. A KDL syntax error, such as an unquoted chord that needs quotes or an unbalanced brace, drops the whole file instead: Herdr starts with the default keys and the `ctrl+b` prefix, and a live reload keeps the keys already in use. See [Keymap](/docs/keymap/#checking-your-file). `herdr keymap print` shows the tree Herdr is actually using. If your keys still live in `[keys]` in `config.toml`, run `herdr keymap migrate`.
 
 ## Remote attach cannot authenticate
 
