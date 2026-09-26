@@ -758,13 +758,16 @@ fn parse_menu(
 /// Replace the command text of `shell`, `pane`, and `popup` leaves with a
 /// placeholder, so a server can share its keymap with clients without sharing
 /// the commands it runs. Clients invoke commands by chord path.
+///
+/// Comments and slash-dashed (`/-`) nodes, entries, and children blocks are
+/// dropped too: they can hold commented-out commands, and KDL keeps them as
+/// formatting text that the walk below never sees.
 pub(crate) fn redact_commands(text: &str) -> Option<String> {
     let mut document = text.parse::<KdlDocument>().ok()?;
     fn walk(document: &mut KdlDocument) {
         for node in document.nodes_mut() {
             if let Some(children) = node.children_mut().as_mut() {
                 walk(children);
-                continue;
             }
             let positional = node
                 .entries()
@@ -784,5 +787,8 @@ pub(crate) fn redact_commands(text: &str) -> Option<String> {
         }
     }
     walk(&mut document);
+    // Rewrites every node, entry, and children block from its parsed value,
+    // discarding the original text around them.
+    document.autoformat_no_comments();
     Some(document.to_string())
 }
