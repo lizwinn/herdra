@@ -28,7 +28,7 @@ A menu opens when you press its key and shows its children in the bottom bar. Ke
 - **`sticky` menus keep every key open until you press `esc`.** Resize (`ctrl+b p r`) is sticky, so `h h h` resizes three steps. A key in a submenu of a sticky menu returns you to the sticky menu.
 - **Mode menus are where `esc` returns to.** Copy mode is a mode: press the prefix inside copy mode, run a command, and you land back in copy mode. Entering a mode closes the menus you passed through to reach it, as an action would, so leaving copy mode (`ctrl+b p y`, then `q`) returns you to the pane.
 - **Top-level chords work everywhere.** The prefix reopens the main menu from inside any menu, and prefix-free chords such as `alt+h` work inside copy mode too.
-- **`fallthrough` menus share the keys of the menu under them.** A key the menu does not bind is looked up in the menu it was opened from, and runs as if you pressed it there. Classic's navigate menu uses this, so every prefix key also works in navigate mode.
+- **`fallthrough` menus share the keys of the menu under them.** A key the menu does not bind is looked up in the menu under it on the stack, and runs as if you pressed it there. Classic's navigate menu uses this, so prefix keys that navigate does not bind itself also work in navigate mode. A `mode` menu starts a new stack, so nothing is under it to fall through to.
 - **Unknown keys** close a menu, unless it is sticky or sets `unmatched=ignore`. At the top level they go to the pane.
 
 Press `?` in the main menu to list every key in the tree. The list is grouped by menu and filters as you type after `/`.
@@ -83,7 +83,7 @@ A built-in key inside a menu that is the same chord as your prefix gives way to 
 | `view=workspace-list` | Show the workspace list while the menu is open. |
 | `view=copy` | Run copy mode on the focused pane while the menu is open. Copy menus are sticky modes unless you say otherwise. |
 | `view=navigator` | Show the navigator (the goto picker) while the menu is open. |
-| `view=help` | Show the keybind list while the menu is open. It starts with any problems in your keymap files. `?` in a menu that does not bind it opens this list at that menu's keys. |
+| `view=help` | Show the keybind list while the menu is open. It starts with any problems in your keymap files. `?` in any menu that does not bind it opens this list over that menu, at that menu's keys (from the main menu, at the top), even in menus with `unmatched=forward`. |
 | `view=settings` | Show settings while the menu is open. |
 | `unmatched=ignore\|cancel\|forward` | What an unbound key does: nothing, close the menu, or close it and send the key to the pane. |
 | `bar=full\|badge\|hidden` | Show every hint, only the menu title, or no bar. Menus without `bar=` follow `ui.mode_hint_bar` in `config.toml`. |
@@ -92,7 +92,7 @@ A built-in key inside a menu that is the same chord as your prefix gives way to 
 | `hidden`, `priority=N` | As for leaves. |
 | `replace` | Swap this menu's children for the ones you write instead of adding to them. The menu keeps its title, flags, and id unless you set new ones. |
 
-Navigator, help, and settings menus are sticky and hide the bottom bar unless you say otherwise; the popup lists the menu's keys itself, from the same hints the bar would show. Opening the popup any other way (a click, the global menu, or a leaf such as `app.help`) opens the first menu with its view, and closing the popup closes its menu. While the navigator search or the keybind filter has focus, keys edit the text instead: `esc` leaves the field, and `enter` opens the selected row or closes the list.
+Navigator, help, and settings menus are sticky unless you say otherwise. The bottom bar never shows while a popup is open; the popup lists the menu's keys itself, from the same hints the bar would show. Opening the popup any other way (a click, the global menu, or a leaf such as `app.help`) opens the first menu with its view. With `base none` and no such menu of your own, that menu is empty, so the popup only answers `esc`, `backspace`, and `?`. Closing the popup with a key returns to the menu it was opened over; dismissing it with a click closes the menus under it too. While the navigator search or the keybind filter has focus, keys edit the text instead: `esc` leaves the field, and `enter` opens the selected row or closes the list.
 
 ## Changing the default tree
 
@@ -497,4 +497,4 @@ Plugins can ship their own `keymap.kdl` that adds keys and menus to this tree. H
 
 Herdra no longer reads the `[keys]` table, `[[keys.command]]`, or `[keys.indexed]` in `config.toml`. `herdr config check` reports them. Run `herdr keymap migrate` to convert them: it writes a `keymap.kdl` that starts from `base classic` and applies your changes, backs up `config.toml`, and removes `[keys]` from it. `keys.remote_image_paste` moves to `[remote] image_paste_key`. Use `--dry-run` to print the result without writing anything.
 
-The converted file lists only what differs from the classic tree. When two old settings claimed the same key, it goes to the setting that won before. `migrate` prints a note for each setting it could not carry over, such as a key without the prefix that would intercept typing. If `keymap.kdl` already exists, it prints the lines to add by hand instead. If the converted file would not load, it writes nothing, leaves `config.toml` unchanged, prints the problems, and exits with an error.
+The converted file lists only what differs from the classic tree. When two old settings claimed the same key, it goes to the setting that won before. `migrate` prints a note for each setting it could not carry over, such as a key without the prefix that would intercept typing. If `keymap.kdl` already exists, it prints the lines to add by hand instead. If the converted file would not load, it writes nothing, leaves `config.toml` unchanged, prints the problems, and exits with an error; `--dry-run` prints the problems and exits with an error too.
