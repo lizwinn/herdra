@@ -23,7 +23,15 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "worktrees",
 ];
 
+/// The directory name under the config and state homes. A build made with
+/// `HERDR_APP_DIR=herdra` keeps its own files and server, so it can run next
+/// to an installed Herdr.
 pub fn app_dir_name() -> &'static str {
+    if let Some(name) = option_env!("HERDR_APP_DIR").map(str::trim) {
+        if !name.is_empty() {
+            return name;
+        }
+    }
     if cfg!(debug_assertions) {
         "herdr-dev"
     } else {
