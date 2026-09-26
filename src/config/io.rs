@@ -959,6 +959,65 @@ mod tests {
     }
 
     #[test]
+    fn keymap_path_prefers_env_then_config_then_config_dir() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        struct RestoreEnv;
+        impl Drop for RestoreEnv {
+            fn drop(&mut self) {
+                std::env::remove_var(KEYMAP_PATH_ENV_VAR);
+                std::env::remove_var(CONFIG_PATH_ENV_VAR);
+            }
+        }
+        let _restore = RestoreEnv;
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-keymap-path-precedence-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_file = dir.join("config.toml");
+        std::fs::write(&config_file, "").unwrap();
+        std::fs::write(dir.join("keymap.kdl"), "base prefix=ctrl+a\n").unwrap();
+        std::fs::write(dir.join("custom.kdl"), "base prefix=ctrl+x\n").unwrap();
+        let env_file = dir.join("from-env.kdl");
+        std::fs::write(&env_file, "base prefix=ctrl+y\n").unwrap();
+        std::env::set_var(CONFIG_PATH_ENV_VAR, &config_file);
+        std::env::remove_var(KEYMAP_PATH_ENV_VAR);
+        let loaded_keymap = || {
+            load_live_config()
+                .expect("live config")
+                .config
+                .keymap_file
+                .expect("keymap file")
+        };
+
+        let default_config = Config::default();
+        let custom_config: Config = toml::from_str("[keymap]\npath = \"custom.kdl\"\n").unwrap();
+        assert_eq!(keymap_path(&default_config), dir.join("keymap.kdl"));
+        assert_eq!(keymap_path(&custom_config), dir.join("custom.kdl"));
+        assert_eq!(loaded_keymap().text, "base prefix=ctrl+a\n");
+
+        std::fs::write(&config_file, "[keymap]\npath = \"custom.kdl\"\n").unwrap();
+        assert_eq!(loaded_keymap().text, "base prefix=ctrl+x\n");
+        assert_eq!(loaded_keymap().source, "custom.kdl");
+
+        std::env::set_var(KEYMAP_PATH_ENV_VAR, &env_file);
+        assert_eq!(keymap_path(&default_config), env_file);
+        assert_eq!(keymap_path(&custom_config), env_file);
+        assert_eq!(loaded_keymap().text, "base prefix=ctrl+y\n");
+        assert_eq!(loaded_keymap().source, "from-env.kdl");
+
+        // A blank override is not a path.
+        std::env::set_var(KEYMAP_PATH_ENV_VAR, "  ");
+        assert_eq!(keymap_path(&custom_config), dir.join("custom.kdl"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn load_live_config_parses_session_section() {
         let loaded = load_live_config_from_str(
             r#"
