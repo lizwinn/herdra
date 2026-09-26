@@ -758,3 +758,66 @@ fn keys_match_by_the_character_they_type_when_the_code_differs() {
     assert_eq!(titles(&keymap, stack), ["copy"]);
     assert_eq!(ran, ["copy.search.forward"]);
 }
+
+#[test]
+fn shared_keymaps_drop_comments_and_slashdashed_nodes() {
+    let text = r#"// secret-line-comment "lazygit --token a"
+base prefix=ctrl+a /* secret-settings-comment */
+/* secret-block-comment
+   shell "rm -rf secret" */
+prefix {
+    g popup "lazygit --token secret" git width="80%" // secret-inline-comment
+    /-x shell "secret-slashdash-node"
+    r plugin example.run /-"secret-slashdash-arg" hint="run it"
+    t /* secret-inline-block */ tab.new stay
+    m "menu" sticky /-{ s shell "secret-slashdash-children"; } {
+        n tab.new
+        /-o pane "secret-nested-slashdash"
+    }
+}
+/-z shell "secret-trailing-node"
+"#;
+    let redacted = redact_commands(text).expect("valid KDL");
+    for leaked in ["secret", "//", "/*", "/-"] {
+        assert!(!redacted.contains(leaked), "{leaked:?} in {redacted}");
+    }
+
+    // Everything real survives, except the command text.
+    let without_commands = |keymap: &CompiledKeymap| {
+        let mut info = describe(keymap);
+        for menu in &mut info.menus {
+            for binding in &mut menu.bindings {
+                if binding.kind == "command" {
+                    binding.target.clear();
+                    binding.description.clear();
+                }
+            }
+        }
+        info
+    };
+    let original = build(text);
+    let shared = build(&redacted);
+    assert!(
+        original.diagnostics.is_empty(),
+        "{:?}",
+        original.diagnostics
+    );
+    assert!(shared.diagnostics.is_empty(), "{:?}", shared.diagnostics);
+    assert_eq!(without_commands(&shared), without_commands(&original));
+    assert_eq!(shared.prefix, (KeyCode::Char('a'), KeyModifiers::CONTROL));
+    assert_eq!(
+        shared
+            .commands
+            .iter()
+            .map(|command| (command.path_label.as_str(), command.spec.command.as_str()))
+            .collect::<Vec<_>>(),
+        [("ctrl+a g", "…"), ("ctrl+a r", "example.run")]
+    );
+    assert_eq!(
+        shared.commands[0].spec.width,
+        original.commands[0].spec.width
+    );
+    let menu = shared.menu_by_path("ctrl+a m").expect("sticky menu");
+    assert!(shared.menu(menu).sticky);
+    assert_eq!(shared.menu(menu).bindings.len(), 1);
+}
