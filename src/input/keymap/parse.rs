@@ -66,6 +66,19 @@ pub(crate) struct KeymapLayer {
     pub(crate) source: String,
     pub(crate) owner: LayerOwner,
     pub(crate) nodes: Vec<RawNode>,
+    /// Menus declared without a key (`menu id=name { ... }`), which only
+    /// `menu.open` reaches.
+    pub(crate) named: Vec<NamedMenu>,
+}
+
+/// The node name that declares a menu without a key.
+pub(crate) const KEYLESS_MENU_WORD: &str = "menu";
+
+#[derive(Clone, Debug)]
+pub(crate) struct NamedMenu {
+    pub(crate) id: String,
+    pub(crate) line: usize,
+    pub(crate) menu: RawMenu,
 }
 
 /// Settings from a user keymap's `base` node.
@@ -344,12 +357,31 @@ pub(crate) fn layer_from_document(
         source: source.to_owned(),
         owner: owner.clone(),
         nodes: Vec::new(),
+        named: Vec::new(),
     };
     for node in document.nodes() {
         if node.name().value() == "base" {
             if owner != LayerOwner::User {
                 let line = context.line(node.span().offset());
                 context.report(line, "base is only allowed in your keymap.kdl");
+            }
+            continue;
+        }
+        if node.name().value() == KEYLESS_MENU_WORD {
+            if let Some(named) = parse_keyless_menu(node, &mut context) {
+                match layer.named.iter().find(|existing| existing.id == named.id) {
+                    Some(existing) => {
+                        let first_line = existing.line;
+                        context.report(
+                            named.line,
+                            format!(
+                                "menu id {:?} is already declared on line {first_line}; keeping the first",
+                                named.id
+                            ),
+                        );
+                    }
+                    None => layer.named.push(named),
+                }
             }
             continue;
         }
@@ -374,6 +406,7 @@ pub(crate) fn parse_layer(
             source: source.to_owned(),
             owner,
             nodes: Vec::new(),
+            named: Vec::new(),
         },
     }
 }
@@ -402,9 +435,31 @@ fn push_unique(nodes: &mut Vec<RawNode>, node: RawNode, context: &mut Context<'_
     nodes.push(node);
 }
 
+/// A top-level `menu id=name { ... }` node: a menu with no key of its own.
+fn parse_keyless_menu(node: &KdlNode, context: &mut Context<'_>) -> Option<NamedMenu> {
+    let line = context.line(node.span().offset());
+    let Some(children) = node.children() else {
+        context.report(line, "menu needs a block of keys");
+        return None;
+    };
+    let menu = parse_menu(node, children, 1, line, context)?;
+    let Some(id) = menu.id.clone() else {
+        context.report(
+            line,
+            "a menu without a key needs id=<name> so menu.open can reach it",
+        );
+        return None;
+    };
+    Some(NamedMenu { id, line, menu })
+}
+
 fn parse_node(node: &KdlNode, depth: usize, context: &mut Context<'_>) -> Option<RawNode> {
     let line = context.line(node.span().offset());
     let name = node.name().value();
+    if name == KEYLESS_MENU_WORD && depth > 1 {
+        context.report(line, "a menu without a key must be at the top level");
+        return None;
+    }
     let is_prefix = name == "prefix";
     let parsed = if is_prefix {
         Ok(Chord::Key(context.prefix))

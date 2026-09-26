@@ -224,6 +224,7 @@ impl CompiledKeymap {
                 source: base.id().to_owned(),
                 owner: LayerOwner::Builtin,
                 nodes: Vec::new(),
+                named: Vec::new(),
             }),
         }
         let mut sorted_plugins = plugins.iter().collect::<Vec<_>>();
@@ -251,7 +252,10 @@ impl CompiledKeymap {
             .iter()
             .map(|layer| (layer.owner.clone(), layer.source.clone()))
             .collect();
-        let (merged, detached) = merge_layers(layers, &mut conflicts);
+        let mut named_detached = Vec::new();
+        let named = merge_named_menus(&layers, &mut conflicts, &mut named_detached);
+        let (merged, mut detached) = merge_layers(layers, &mut conflicts);
+        detached.extend(named_detached);
         let mut compiler = Compiler {
             menus: Vec::new(),
             commands: Vec::new(),
@@ -269,6 +273,10 @@ impl CompiledKeymap {
             &[],
             &LayerOwner::Builtin,
         );
+        for (owner, menu) in named {
+            let children = menu.children.clone();
+            compiler.add_menu(None, None, menu, &children, &[], &owner);
+        }
         // Named menus whose key was rebound or unbound stay reachable by
         // `menu.open`, unless a later layer reused their id.
         for node in detached {
@@ -655,10 +663,13 @@ impl Compiler<'_> {
             view.filter(|view| view.is_overlay())
                 .map(|_| BarVisibility::Hidden)
         });
-        let title = meta
-            .title
-            .clone()
-            .unwrap_or_else(|| entry_chord.map(Chord::label).unwrap_or_default());
+        // A menu without a key is titled after its id unless it says otherwise.
+        let title = meta.title.clone().unwrap_or_else(|| {
+            entry_chord
+                .map(Chord::label)
+                .or_else(|| meta.id.clone())
+                .unwrap_or_default()
+        });
         self.menus.push(CompiledMenu {
             parent,
             entry_chord,
@@ -908,6 +919,62 @@ fn merge_layers(
         );
     }
     (merged, detached)
+}
+
+/// Merge menus declared without a key, matching them by id. A later layer
+/// adds to or changes an earlier menu with the same id; plugins may only
+/// add keys to menus they did not declare.
+fn merge_named_menus(
+    layers: &[KeymapLayer],
+    conflicts: &mut Vec<String>,
+    detached: &mut Vec<RawNode>,
+) -> Vec<(LayerOwner, RawMenu)> {
+    let mut named: Vec<(LayerOwner, String, RawMenu)> = Vec::new();
+    for layer in layers {
+        let overlay = Overlay {
+            owner: &layer.owner,
+            source: &layer.source,
+        };
+        for item in &layer.named {
+            let Some((existing_owner, _, existing)) =
+                named.iter_mut().find(|(_, id, _)| *id == item.id)
+            else {
+                named.push((layer.owner.clone(), item.id.clone(), item.menu.clone()));
+                continue;
+            };
+            let may_edit = overlay.may_edit(existing_owner);
+            if item.menu.replace && !may_edit {
+                conflicts.push(format!(
+                    "keymap {}:{}: menu id {:?} is already declared by {}; keeping that menu",
+                    layer.source,
+                    item.line,
+                    item.id,
+                    existing_owner.label()
+                ));
+                continue;
+            }
+            if may_edit {
+                merge_menu_metadata(existing, &item.menu);
+            }
+            if item.menu.replace {
+                for old in std::mem::replace(&mut existing.children, item.menu.children.clone()) {
+                    detach_named_menus(old, detached);
+                }
+            } else {
+                merge_level(
+                    &mut existing.children,
+                    item.menu.children.clone(),
+                    &overlay,
+                    conflicts,
+                    detached,
+                );
+            }
+        }
+    }
+    named
+        .into_iter()
+        .map(|(owner, _, menu)| (owner, menu))
+        .collect()
 }
 
 struct Overlay<'a> {

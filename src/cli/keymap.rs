@@ -34,7 +34,8 @@ pub(super) fn run_keymap_command(args: &[String]) -> std::io::Result<i32> {
 
 pub(super) fn print_help() {
     eprintln!("herdr keymap commands:");
-    eprintln!("  herdr keymap print [--json]          show the effective keymap tree");
+    eprintln!("  herdr keymap print [--json] [--node PATH]");
+    eprintln!("                                       show the effective keymap tree, or one menu");
     eprintln!("  herdr keymap default [herdra|classic] print a built-in keymap");
     eprintln!("  herdr keymap check [FILE]            validate keymap.kdl and print diagnostics");
     eprintln!("  herdr keymap path                    print where keymap.kdl is read from");
@@ -71,14 +72,37 @@ fn effective_keymap() -> (KeymapInfo, &'static str) {
     )
 }
 
+const PRINT_USAGE: &str = "herdr keymap print [--json] [--node PATH]";
+
 fn print(args: &[String]) -> std::io::Result<i32> {
-    let json = match args {
-        [] => false,
-        [flag] if flag == "--json" => true,
-        _ => return usage("herdr keymap print [--json]"),
+    let mut json = false;
+    let mut node: Option<String> = None;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--node" => match rest.next() {
+                Some(path) if node.is_none() => node = Some(path.trim().to_owned()),
+                _ => return usage(PRINT_USAGE),
+            },
+            _ => return usage(PRINT_USAGE),
+        }
+    }
+    let (mut keymap, source) = effective_keymap();
+    let root = node.as_deref().unwrap_or("");
+    let Some(root_menu) = keymap.menus.iter().find(|menu| menu.path == root) else {
+        eprintln!(
+            "keymap: no menu at {root:?}; `herdr keymap print` shows every menu with its keys"
+        );
+        return Ok(1);
     };
-    let (keymap, source) = effective_keymap();
     if json {
+        if !root.is_empty() {
+            let under = format!("{root} ");
+            keymap
+                .menus
+                .retain(|menu| menu.path == root || menu.path.starts_with(&under));
+        }
         println!(
             "{}",
             serde_json::to_string_pretty(&keymap).unwrap_or_else(|_| "{}".to_owned())
@@ -90,7 +114,13 @@ fn print(args: &[String]) -> std::io::Result<i32> {
         keymap.base, keymap.prefix
     );
     let mut output = String::new();
-    write_menu(&keymap, "", 0, &mut output);
+    let depth = if root.is_empty() {
+        0
+    } else {
+        let _ = writeln!(output, "{root}  +{}", root_menu.title);
+        1
+    };
+    write_menu(&keymap, root, depth, &mut output);
     print!("{output}");
     for diagnostic in keymap.diagnostics.iter().chain(&keymap.conflicts) {
         eprintln!("{diagnostic}");

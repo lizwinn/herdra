@@ -1165,3 +1165,58 @@ fn every_action_has_a_catalog_entry_and_a_default_key() {
         "bind these in default.kdl or list them in UNBOUND_BY_DEFAULT: {unbound:?}"
     );
 }
+
+#[test]
+fn menus_without_a_key_are_reachable_through_menu_open() {
+    let keymap = build(
+        r#"
+        menu "Extras" id=extras sticky { z pane.zoom }
+        prefix { e menu.open extras }
+        alt+e menu.open extras
+        "#,
+    );
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    let (stack, ran) = press(&keymap, &[ctrl('b'), ch('e'), ch('z')]);
+    assert_eq!(titles(&keymap, stack), ["herdra", "Extras"]);
+    assert_eq!(ran, ["pane.zoom"]);
+    let alt_e = TerminalKey::new(KeyCode::Char('e'), KeyModifiers::ALT);
+    assert_eq!(press(&keymap, &[alt_e, ch('z')]).1, ["pane.zoom"]);
+    assert_eq!(
+        press(&keymap, &[ch('z')]).1,
+        ["forward"],
+        "no key of its own"
+    );
+
+    let keymap = build("menu { z pane.zoom }");
+    assert_eq!(
+        keymap.diagnostics,
+        ["keymap keymap.kdl:1: a menu without a key needs id=<name> so menu.open can reach it"]
+    );
+    let keymap = build("prefix { menu id=inner { z pane.zoom } }");
+    assert_eq!(
+        keymap.diagnostics,
+        ["keymap keymap.kdl:1: a menu without a key must be at the top level"]
+    );
+
+    // A plugin declares one; the user adds a key and opens it.
+    let plugin = KeymapText {
+        source: "example.layout/keymap.kdl".to_owned(),
+        text: "menu \"Layouts\" id=layouts { a plugin apply }".to_owned(),
+    };
+    let keymap = CompiledKeymap::build(
+        Some(&user(
+            "menu id=layouts { z pane.zoom }\nalt+l menu.open layouts",
+        )),
+        &[("example.layout".to_owned(), plugin)],
+    );
+    assert!(keymap.diagnostics.is_empty(), "{:?}", keymap.diagnostics);
+    assert!(keymap.conflicts.is_empty(), "{:?}", keymap.conflicts);
+    let alt_l = TerminalKey::new(KeyCode::Char('l'), KeyModifiers::ALT);
+    let (stack, _) = press(&keymap, std::slice::from_ref(&alt_l));
+    assert_eq!(titles(&keymap, stack), ["Layouts"]);
+    let (stack, ran) = press(&keymap, &[alt_l.clone(), ch('z')]);
+    assert_eq!(stack, None, "the plugin's menu is one-shot");
+    assert_eq!(ran, ["pane.zoom"]);
+    let layouts = keymap.menu_by_path("(layouts)").expect("keyless menu");
+    assert_eq!(keymap.menu(layouts).bindings.len(), 2);
+}
