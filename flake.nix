@@ -57,9 +57,21 @@
           herdr = pkgs.callPackage ./nix/package.nix {
             rustPlatform = rustPlatformFor pkgs;
           };
+          # The same program as the `herdra` binary with its own config and
+          # state directories (~/.config/herdra), for machines that keep an
+          # upstream Herdr installed next to it.
+          herdra = herdr.overrideAttrs (previous: {
+            pname = "herdra";
+            env = (previous.env or { }) // {
+              HERDR_APP_DIR = "herdra";
+            };
+            postInstall = (previous.postInstall or "") + ''
+              mv "$out/bin/herdr" "$out/bin/herdra"
+            '';
+          });
         in
         {
-          inherit herdr;
+          inherit herdr herdra;
           default = herdr;
         }
       );
@@ -74,6 +86,7 @@
 
       checks = forAllSystems (system: {
         herdr = self.packages.${system}.default;
+        herdra = self.packages.${system}.herdra;
         default = self.checks.${system}.herdr;
       });
 
