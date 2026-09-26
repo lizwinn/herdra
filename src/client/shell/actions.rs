@@ -190,17 +190,7 @@ impl ClientShellState {
                     return;
                 }
                 let action: crate::protocol::ClientShellCommandAction = command.spec.kind.into();
-                let command_id = self.snapshot.as_deref().and_then(|snapshot| {
-                    let mut candidates = snapshot.commands.iter().filter(|candidate| {
-                        candidate.action == action
-                            && candidate.binding_labels.contains(&command.path_label)
-                    });
-                    let candidate = candidates.next()?;
-                    candidates
-                        .next()
-                        .is_none()
-                        .then(|| candidate.command_id.clone())
-                });
+                let command_id = self.endpoint_command_id(&command, action);
                 let Some(command_id) = command_id else {
                     self.set_endpoint_error(
                         "command is not available on this endpoint; reload configuration",
@@ -267,6 +257,58 @@ impl ClientShellState {
                 }
             }
         }
+    }
+
+    /// The server's id for a command key. With the server's keymap
+    /// projection, match the command's fingerprint, or its keys for commands
+    /// from the server's own redacted keymap; older servers by keys alone.
+    fn endpoint_command_id(
+        &self,
+        command: &crate::input::keymap::CompiledCommand,
+        action: crate::protocol::ClientShellCommandAction,
+    ) -> Option<String> {
+        let snapshot = self.snapshot.as_deref()?;
+        let offered = |id: &str| {
+            snapshot
+                .commands
+                .iter()
+                .any(|candidate| candidate.command_id == id && candidate.action == action)
+        };
+        let projection = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+            .and_then(|endpoint| endpoint.keymap_projection.as_ref())
+            .filter(|projection| {
+                projection.boot_id == snapshot.boot_id && !projection.commands.is_empty()
+            });
+        if let Some(projection) = projection {
+            let offered_entries = projection
+                .commands
+                .iter()
+                .filter(|entry| offered(&entry.command_id));
+            let matching = match command.identity(&projection.boot_id) {
+                Some(identity) => offered_entries
+                    .filter(|entry| entry.identity == identity)
+                    .collect::<Vec<_>>(),
+                None => offered_entries
+                    .filter(|entry| entry.path == command.path_label)
+                    .collect(),
+            };
+            return matching
+                .iter()
+                .find(|entry| entry.path == command.path_label)
+                .or(matching.first())
+                .map(|entry| entry.command_id.clone());
+        }
+        let mut candidates = snapshot.commands.iter().filter(|candidate| {
+            candidate.action == action && candidate.binding_label == command.path_label
+        });
+        let candidate = candidates.next()?;
+        candidates
+            .next()
+            .is_none()
+            .then(|| candidate.command_id.clone())
     }
 
     pub(super) fn request_selection_copy(&mut self, outcome: &mut ClientShellInput, live: bool) {

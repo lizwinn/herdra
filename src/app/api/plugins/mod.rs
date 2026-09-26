@@ -1258,14 +1258,27 @@ command = ["true"]
             .bindings
             .iter()
             .any(|binding| binding.hint == "layout"));
-        assert!(app
-            .client_shell_command_manifest()
+        let manifest = app.client_shell_command_manifest();
+        let command = manifest
             .iter()
-            .any(|command| command.binding_labels == ["ctrl+b p g"]
-                && command.action == crate::protocol::ClientShellCommandAction::PluginAction));
+            .find(|command| command.binding_label == "ctrl+b p g")
+            .expect("plugin command in the manifest");
+        assert_eq!(
+            command.action,
+            crate::protocol::ClientShellCommandAction::PluginAction
+        );
+        assert!(
+            command.binding_labels.is_empty(),
+            "older clients cannot express a two-key path"
+        );
         let projection = app.keymap_projection("boot");
         assert_eq!(projection.plugins.len(), 1);
         assert_eq!(projection.plugins[0].plugin_id, "example.layout");
+        assert!(projection.commands.iter().any(|entry| {
+            entry.command_id == command.command_id
+                && entry.path == "ctrl+b p g"
+                && entry.identity.len() == 24
+        }));
 
         let revision = app.keymap_revision;
         app.replace_installed_plugins(vec![plugin.clone()]);
