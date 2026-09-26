@@ -652,6 +652,12 @@ impl ClientShellState {
     }
 
     pub(super) fn handle_mouse(&mut self, mouse: MouseEvent, outcome: &mut ClientShellInput) {
+        let popup_before = self.overlay_view();
+        self.handle_mouse_event(mouse, outcome);
+        self.close_menus_after_popup_click(popup_before, outcome);
+    }
+
+    fn handle_mouse_event(&mut self, mouse: MouseEvent, outcome: &mut ClientShellInput) {
         self.update_link_hover(mouse, outcome);
         let point = (mouse.column, mouse.row);
         if self.workspace_list_active()

@@ -158,6 +158,12 @@ fn question_mark_opens_the_keybind_list_at_the_menu_it_was_pressed_in() {
     state.handle_input_bytes(b"?");
     state.handle_input_bytes(b"\x1b");
     assert!(state.overlay.is_none());
+    assert_eq!(
+        menu_titles(&state),
+        ["herdra", "pane"],
+        "esc closes the list and returns to the menu it was opened over"
+    );
+    state.handle_input_bytes(b"\x1b");
     assert_eq!(state.mode, ClientShellMode::Terminal);
 
     state.handle_input_bytes(&[0x02]);
@@ -348,4 +354,29 @@ fn search_fields_take_typing_until_enter_or_esc() {
     state.handle_input_bytes(b"\r");
     assert!(state.overlay.is_none(), "enter closes the list");
     assert_eq!(state.mode, ClientShellMode::Terminal);
+}
+
+#[test]
+fn closing_help_opened_over_a_menu_returns_to_that_menu() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).unwrap();
+    state.handle_input_bytes(b"\x02w");
+    assert_eq!(state.mode_name(), "workspace");
+    state.handle_input_bytes(b"?");
+    assert!(matches!(state.overlay, Some(ClientShellOverlay::Help(_))));
+    state.handle_input_bytes(b"\x1b");
+    assert!(state.overlay.is_none());
+    assert_eq!(state.mode_name(), "workspace", "the list is still open");
+
+    state.handle_input_bytes(b"\x1b");
+    state.handle_input_bytes(b"\x02?");
+    assert!(matches!(state.overlay, Some(ClientShellOverlay::Help(_))));
+    state.handle_input_bytes(b"\x1b");
+    assert_eq!(
+        state.mode,
+        ClientShellMode::Terminal,
+        "help opened from the main menu closes the menu it passed through"
+    );
 }

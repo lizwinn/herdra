@@ -53,7 +53,7 @@ then start it where the work lives:
 herdr
 ```
 
-run your agents, split panes, walk away. `ctrl+b s d` detaches, `herdr` reattaches. [quick start →](https://herdr.dev/docs/quick-start/)
+run your agents, split panes, walk away. `ctrl+b q` detaches, `herdr` reattaches. [quick start →](https://herdr.dev/docs/quick-start/)
 
 ## docs
 
