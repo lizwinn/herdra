@@ -461,6 +461,64 @@ mod tests {
         std::fs::remove_file(path).expect("remove endpoint chrome");
     }
 
+    /// A config.toml and keymap.kdl on disk that `load_live_config` reads
+    /// while the returned guard holds the config env lock.
+    struct DiskConfig {
+        dir: std::path::PathBuf,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl DiskConfig {
+        fn new(name: &str, keymap: &str) -> Self {
+            let lock = crate::config::test_config_env_lock()
+                .lock()
+                .expect("config env lock");
+            let dir = std::env::temp_dir().join(format!(
+                "herdr-client-reload-{name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_nanos())
+                    .unwrap_or(0)
+            ));
+            std::fs::create_dir_all(&dir).expect("create config dir");
+            std::fs::write(dir.join("config.toml"), "").expect("write config");
+            std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, dir.join("config.toml"));
+            let config = Self { dir, _lock: lock };
+            config.write_keymap(keymap);
+            config
+        }
+
+        fn write_keymap(&self, text: &str) {
+            std::fs::write(self.dir.join("keymap.kdl"), text).expect("write keymap");
+        }
+    }
+
+    impl Drop for DiskConfig {
+        fn drop(&mut self) {
+            std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn live_reload_keeps_the_keymap_when_keymap_kdl_has_a_syntax_error() {
+        let disk = DiskConfig::new("syntax-error", "base prefix=ctrl+a\n");
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.reload_client_config();
+        assert_eq!(
+            state.config.keymap.prefix,
+            (KeyCode::Char('a'), KeyModifiers::CONTROL)
+        );
+        let keymap = std::sync::Arc::clone(&state.config.keymap);
+
+        disk.write_keymap("base prefix=ctrl+a\nprefix {\n");
+        state.reload_client_config();
+
+        assert!(std::sync::Arc::ptr_eq(&state.config.keymap, &keymap));
+        assert!(state.local_config_diagnostic.is_some());
+    }
+
     #[test]
     fn live_reload_preserves_invalid_client_owned_sections() {
         let mut initial = Config::default();

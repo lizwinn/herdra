@@ -1810,6 +1810,43 @@ mod tests {
     }
 
     #[test]
+    fn reload_config_keeps_the_keymap_when_keymap_kdl_has_a_syntax_error() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-keymap-syntax-error");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "").unwrap();
+        write_keymap(&path, "base prefix=ctrl+a\nprefix { m workspace.new }\n");
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        assert_eq!(
+            app.reload_config().status,
+            crate::config::ConfigReloadStatus::Applied
+        );
+        let revision = app.keymap_revision;
+        write_keymap(&path, "base prefix=ctrl+a\nprefix { m workspace.new\n");
+        let report = app.reload_config();
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Partial);
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.contains("keeping current keymap")),
+            "{:?}",
+            report.diagnostics
+        );
+        assert_eq!(
+            app.keymap.prefix,
+            (KeyCode::Char('a'), KeyModifiers::CONTROL)
+        );
+        assert_eq!(keymap_binding(&app, "ctrl+a", "m"), Some("workspace.new"));
+        assert_eq!(app.keymap_revision, revision, "clients keep their keymap");
+    }
+
+    #[test]
     fn reload_config_keeps_kitty_graphics_until_restart() {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-kitty-graphics");
