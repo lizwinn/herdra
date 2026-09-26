@@ -112,7 +112,6 @@ prefix prefix id=prefix {
         l pane.focus.right hidden stay
         left pane.focus.left hidden stay
         right pane.focus.right hidden stay
-        "?" app.help stay
         w menu.cancel hidden
     }
 

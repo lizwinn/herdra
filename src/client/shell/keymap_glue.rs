@@ -74,6 +74,20 @@ impl ClientShellState {
     }
 
     /// The view of the popup overlay that is open, if it is one.
+    /// A click that dismissed a popup also closes the menus it was opened
+    /// over, so the next typed key reaches the pane instead of a one-shot
+    /// menu the popup was hiding. Closing it by keyboard returns to them.
+    pub(super) fn close_menus_after_popup_click(
+        &mut self,
+        popup_before: Option<ViewKind>,
+        outcome: &mut ClientShellInput,
+    ) {
+        if popup_before.is_some() && self.overlay_view().is_none() && self.mode.stack().is_some() {
+            let before = self.open_menus(None, outcome);
+            self.close_views(before, outcome);
+        }
+    }
+
     pub(super) fn overlay_view(&self) -> Option<ViewKind> {
         match self.overlay.as_ref()? {
             ClientShellOverlay::Navigator(_) => Some(ViewKind::Navigator),
@@ -276,22 +290,32 @@ impl ClientShellState {
         }
     }
 
-    /// Close the menus that attach `view`, every menu opened above them, and
-    /// the one-shot menus passed through to reach them, without running view
-    /// hooks. A workspace list closed this way forgets its selection.
+    /// Close the menus that attach `view` and every menu opened above them,
+    /// without running view hooks. When the view's menu was reached by its
+    /// own keys, the one-shot menus passed through on the way close too; a
+    /// view opened over another menu (`?` in the workspace list) returns to
+    /// it. A workspace list closed this way forgets its selection.
     pub(super) fn drop_view_menus(&mut self, view: ViewKind) {
         let Some(stack) = self.mode.stack() else {
             return;
         };
         let keymap = &self.config.keymap;
-        if let Some(position) = stack
-            .frames()
+        let frames = stack.frames();
+        if let Some(position) = frames
             .iter()
             .position(|id| keymap.menu(*id).view == Some(view))
         {
-            let next = stack
-                .truncated(position)
-                .and_then(|stack| stack.without_passed_through(keymap));
+            let reached_by_its_keys = match position.checked_sub(1) {
+                Some(below) => keymap.menu(frames[position]).parent == Some(frames[below]),
+                None => true,
+            };
+            let next = stack.truncated(position).and_then(|stack| {
+                if reached_by_its_keys {
+                    stack.without_passed_through(keymap)
+                } else {
+                    Some(stack)
+                }
+            });
             self.mode = ClientShellMode::from_stack(next);
         }
         if !self.workspace_list_active() {
