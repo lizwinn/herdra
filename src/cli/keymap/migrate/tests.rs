@@ -316,6 +316,21 @@ fn assert_matches_legacy(case: &str, text: &str) -> (LegacyMigration, CompiledKe
             migration.kdl
         );
         match &expectation.expected {
+            // The help, navigator, and settings keys open their popup's menu,
+            // which is what running those actions does.
+            Expected::Runs(runs) if ran.is_empty() => {
+                let view = stack.and_then(|stack| keymap.menu(stack.top()).view);
+                let expected_view = match runs.as_str() {
+                    "app.help" => Some(crate::input::keymap::ViewKind::Help),
+                    "app.navigator" => Some(crate::input::keymap::ViewKind::Navigator),
+                    "app.settings" => Some(crate::input::keymap::ViewKind::Settings),
+                    _ => None,
+                };
+                assert!(
+                    expected_view.is_some() && view == expected_view,
+                    "{context}"
+                );
+            }
             Expected::Runs(runs) => {
                 assert_eq!(ran.last(), Some(runs), "{context}");
             }
@@ -398,6 +413,13 @@ navigate_workspace_down = ["down", "n"]
             r#"
 workspace_picker = "alt+w"
 navigate_workspace_down = "j"
+"#,
+        ),
+        (
+            "navigate on a direct chord and after the prefix",
+            r#"
+workspace_picker = ["alt+w", "prefix+space"]
+new_tab = "prefix+t"
 "#,
         ),
         (
@@ -1108,4 +1130,33 @@ fn a_converted_keymap_is_written_and_keys_are_removed() {
     );
     assert_eq!(table["ui"]["accent"].as_str(), Some("red"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn moved_navigate_prefers_its_key_after_the_prefix() {
+    let (_, keymap) = assert_matches_legacy(
+        "navigate after the prefix",
+        r#"
+workspace_picker = ["alt+w", "prefix+space"]
+new_tab = "prefix+t"
+"#,
+    );
+    let space = TerminalKey::new(KeyCode::Char(' '), KeyModifiers::empty());
+    let ctrl_b = TerminalKey::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
+    let (stack, _) = press(&keymap, &[ctrl_b.clone(), space.clone()]);
+    assert_eq!(
+        titles(&keymap, stack).last().map(String::as_str),
+        Some("navigate")
+    );
+    let (stack, _) = press(&keymap, &[ctrl_b.clone(), space.clone(), space]);
+    assert_eq!(stack, None, "its own key closes navigate, as before");
+    let t = TerminalKey::new(KeyCode::Char('t'), KeyModifiers::empty());
+    let space = TerminalKey::new(KeyCode::Char(' '), KeyModifiers::empty());
+    let (stack, ran) = press(&keymap, &[ctrl_b, space, t]);
+    assert_eq!(stack, None);
+    assert_eq!(
+        ran.last().map(String::as_str),
+        Some("tab.new"),
+        "prefix keys fall through"
+    );
 }
