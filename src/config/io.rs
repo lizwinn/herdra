@@ -316,14 +316,40 @@ pub fn load_live_config() -> Result<LoadedConfig, Vec<String>> {
             )]);
         }
     };
-    if load_keymap_file(&mut loaded.config, &mut loaded.diagnostics) {
+    if !load_keymap_file(&mut loaded.config, &mut loaded.diagnostics) {
+        loaded.invalid_sections.push("keymap".to_owned());
+    } else if let Some(syntax_errors) = keymap_syntax_errors(&loaded.config) {
+        // A half-saved keymap.kdl must not swap the running keymap, and its
+        // prefix, for the default tree.
+        loaded.diagnostics.extend(syntax_errors);
+        loaded.invalid_sections.push("keymap".to_owned());
+    } else {
         loaded
             .diagnostics
             .extend(loaded.config.keymap().diagnostics);
-    } else {
-        loaded.invalid_sections.push("keymap".to_owned());
     }
     Ok(loaded)
+}
+
+/// KDL syntax errors in the keymap file, worded for a live reload that keeps
+/// the running keymap. `None` when there is no file or it parses.
+fn keymap_syntax_errors(config: &Config) -> Option<Vec<String>> {
+    let file = config.keymap_file.as_ref()?;
+    let mut diagnostics = Vec::new();
+    if crate::input::keymap::parse_document(&file.text, &file.source, &mut diagnostics).is_some() {
+        return None;
+    }
+    Some(
+        diagnostics
+            .iter()
+            .map(|diagnostic| {
+                let problem = diagnostic
+                    .strip_suffix("; ignoring this file")
+                    .unwrap_or(diagnostic);
+                format!("{problem}; keeping current keymap")
+            })
+            .collect(),
+    )
 }
 
 fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>> {
@@ -1015,6 +1041,42 @@ mod tests {
         assert_eq!(keymap_path(&custom_config), dir.join("custom.kdl"));
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn live_reload_marks_a_keymap_with_kdl_syntax_errors_invalid() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-keymap-syntax-error-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_file = dir.join("config.toml");
+        std::fs::write(&config_file, "[ui]\nmouse_capture = false\n").unwrap();
+        std::fs::write(dir.join("keymap.kdl"), "base prefix=ctrl+a\nprefix {\n").unwrap();
+        std::env::set_var(CONFIG_PATH_ENV_VAR, &config_file);
+
+        let loaded = load_live_config();
+
+        std::env::remove_var(CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(dir);
+        let loaded = loaded.expect("the rest of the config still loads");
+        assert_eq!(loaded.invalid_sections, ["keymap"]);
+        assert!(!loaded.diagnostics.is_empty());
+        assert!(
+            loaded.diagnostics.iter().all(|diagnostic| {
+                diagnostic.starts_with("keymap keymap.kdl:")
+                    && diagnostic.ends_with("; keeping current keymap")
+                    && !diagnostic.contains("ignoring this file")
+            }),
+            "{:?}",
+            loaded.diagnostics
+        );
+        assert!(!loaded.config.ui.mouse_capture);
     }
 
     #[test]
