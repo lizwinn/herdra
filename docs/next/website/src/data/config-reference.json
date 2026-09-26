@@ -86,7 +86,7 @@
           "key": "theme.custom.selection_bg",
           "type": "color",
           "default": "unset",
-          "description": "Set the Navigate-mode cursor row background in the sidebar without changing other selection surfaces. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+          "description": "Set the background of the selected sidebar row while the workspace list is open, without changing other selection surfaces. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.surface0",
