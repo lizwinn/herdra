@@ -5,7 +5,7 @@ description: Configure Herdr keybindings, themes, sidebar behavior, notification
 
 Herdr works without a config file. Add one when you want custom keys, themes, sidebar layouts, notifications, or advanced behavior.
 
-The [Config reference](/docs/config-reference/) lists every setting and keybinding, with types, defaults, and allowed values. This page covers setup, common recipes, and configuration structures that need more explanation than a reference row.
+The [Config reference](/docs/config-reference/) lists every `config.toml` setting, with types, defaults, and allowed values. Keys live in `keymap.kdl` instead; see [Keymap](/docs/keymap/). This page covers setup, common recipes, and configuration structures that need more explanation than a reference row.
 
 ## Config file
 
@@ -137,14 +137,14 @@ path = "keymap.kdl"   # optional; relative paths start from the config directory
 
 ## Command keys
 
-Keys can run commands. Define them as leaves in `keymap.kdl`:
+Keys can run commands. Define them as leaves in `keymap.kdl`. A key you write replaces the default key at the same path, so pick keys the default tree leaves free; `herdr keymap default` prints it.
 
 ```kdl
 prefix {
-    g popup "lazygit" "run lazygit" width="80%" height="80%"
+    G popup "lazygit" "run lazygit" width="80%" height="80%"
     l plugin "example.layout.apply" "apply layout"
     u shell "git pull"
-    b pane "cargo build"
+    c pane "cargo build"
 }
 ```
 
@@ -220,7 +220,7 @@ red = "#f38ba8"
 yellow = "#f9e2af"
 ```
 
-`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar.
+`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the background of the selected sidebar row while the workspace list is open (`ctrl+b w`).
 
 Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
